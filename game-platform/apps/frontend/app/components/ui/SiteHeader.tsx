@@ -58,13 +58,17 @@ export default function SiteHeader() {
         <div className="flex items-center gap-2">
           {isPending ? null : user ? (
             <>
-              <span className="flex items-center gap-2 rounded-full bg-white/5 py-1 pl-1 pr-1 ring-1 ring-inset ring-white/10 sm:pr-3">
+              <Link
+                href="/profile"
+                aria-label="Your profile"
+                className="flex items-center gap-2 rounded-full bg-white/5 py-1 pl-1 pr-1 ring-1 ring-inset ring-white/10 hover:bg-white/10 sm:pr-3"
+              >
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gold font-display text-sm font-bold text-ink">
                   {user.name.charAt(0).toUpperCase()}
                 </span>
                 <span className="hidden max-w-[10rem] truncate text-sm font-medium sm:inline">{user.name}</span>
                 {isGuest && <span className="hidden text-xs text-chalk sm:inline">(guest)</span>}
-              </span>
+              </Link>
               <button onClick={signOut} className="btn-quiet btn-sm" aria-label="Sign out">
                 <LogOut className="h-4 w-4" aria-hidden="true" />
                 <span className="hidden sm:inline">Sign out</span>

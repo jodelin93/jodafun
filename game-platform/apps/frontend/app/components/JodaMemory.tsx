@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { getSoundManager } from '../lib/sounds/soundManager';
 import SoundControls from './SoundControls';
 import SiteHeader from './ui/SiteHeader';
+import { useAuth } from '../contexts/AuthContext';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -178,7 +179,10 @@ export default function JodaMemory() {
   const [myPlayerIndex, setMyPlayerIndex] = useState(0);
   const [roundTied, setRoundTied] = useState(false);
   // Name of the player who just left, and whether that ended a game in progress
-  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean } | null>(null);
+  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean } | null>(null);
+  const { user, refreshSession } = useAuth();
+  const [codeInput, setCodeInput] = useState('');
+  const [codeError, setCodeError] = useState<string | null>(null);
   // Name of the other player while their connection is down and the server is holding their seat
   const [waitingForName, setWaitingForName] = useState<string | null>(null);
   // Read by the socket 'connect' listener, which outlives renders, to decide whether to rejoin a room
@@ -304,6 +308,11 @@ export default function JodaMemory() {
     // Note: AI turn (currentPlayerIndex === 1 in single mode) does not play myTurn sound
   }, [currentPlayerIndex, isMyTurn, gameStarted, gameWon, soundInitialized, moves]);
 
+  // Start the room name field with the account's chosen name, but not an auto-generated guest one
+  useEffect(() => {
+    if (user && !playerName && !isDefaultGuestName(user.name)) setPlayerName(user.name);
+  }, [user]);
+
   // Save a cleared solo board once, with the same time and move count the win dialog shows
   useEffect(() => {
     if (gameWon && gameStarted && gameMode === 'single' && soloSave === null) {
@@ -355,7 +364,9 @@ export default function JodaMemory() {
       });
 
       // Listen for game started
-      socket.on('gameStarted', (data: { cards: any[]; currentPlayerIndex: number; players: Player[] }) => {
+      socket.on('gameStarted', (data: { cards: any[]; currentPlayerIndex: number; players: Player[]; difficulty?: Difficulty }) => {
+        // Both players lay out the board for the deck the server dealt (24 cards needs the wider grid)
+        if (data.difficulty) setDifficulty(data.difficulty);
         const mappedCards: Card[] = data.cards.map((card: any, index: number) => {
           const imageData = IMAGE_POOL.find(img => img.name === card.iconName);
           return {
@@ -424,14 +435,14 @@ export default function JodaMemory() {
       });
 
       // Listen for player left
-      socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean }) => {
+      socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean; forfeit?: boolean }) => {
         setLobbyPlayers(data.players);
         if (data.players.length === 0) {
           handleBackToMenu();
           return;
         }
         setWaitingForName(null);
-        setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress) });
+        setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit) });
         if (data.gameInProgress) {
           // The server abandons the game and puts the room back in the lobby; mirror that here
           setGameStarted(false);
@@ -905,6 +916,22 @@ export default function JodaMemory() {
     handleStartGame(difficulty);
   };
 
+  // The name typed for a room becomes the account's display name, which is what leaderboards show
+  const saveDisplayName = async (name: string) => {
+    if (!user || name === user.name) return;
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/me`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) await refreshSession();
+    } catch {
+      // The room still uses the typed name; saving it to the account can wait for the next game
+    }
+  };
+
   // Multiplayer functions
   const handleCreateGame = async () => {
     if (!playerName.trim() || !socketRef.current) return;
@@ -918,6 +945,7 @@ export default function JodaMemory() {
           setIsHost(true);
           setLobbyPlayers(response.room.players);
           setShowOpponentMoves(response.room.showOpponentMoves);
+          saveDisplayName(playerName.trim());
 
           // Update URL with room ID
           const url = new URL(window.location.href);
@@ -935,21 +963,37 @@ export default function JodaMemory() {
     }
   };
 
-  const handleJoinGame = async () => {
-    if (!playerName.trim() || !roomId || !socketRef.current) return;
+  // `code` is set when joining with a typed room code instead of an invite link
+  const handleJoinGame = async (code?: string) => {
+    const targetRoom = code ?? roomId;
+    if (!playerName.trim() || !targetRoom || !socketRef.current) return;
 
     try {
       const socket = socketRef.current;
-      socket.emit('joinGame', { roomId, playerName: playerName.trim(), playerKey: getPlayerKey() }, (response: any) => {
+      socket.emit('joinGame', { roomId: targetRoom, playerName: playerName.trim(), playerKey: getPlayerKey() }, (response: any) => {
         if (response.success) {
+          if (code) {
+            setRoomId(response.room?.id ?? code);
+            const url = new URL(window.location.href);
+            url.searchParams.set('roomId', response.room?.id ?? code);
+            window.history.pushState({}, '', url.toString());
+          }
+          setCodeError(null);
           setIsInLobby(true);
           setIsHost(false);
           setLobbyPlayers(response.room.players);
           setShowOpponentMoves(response.room.showOpponentMoves);
+          saveDisplayName(playerName.trim());
 
           if (soundInitialized) {
             getSoundManager().play('match');
           }
+        } else if (code) {
+          setCodeError(
+            /not found/i.test(response.error ?? '')
+              ? `There's no open room with the code ${code}. Check the code, or ask your friend for the link.`
+              : response.error || "Couldn't join that room."
+          );
         } else {
           setConnectionError(response.error || 'Failed to join game');
         }
@@ -976,12 +1020,8 @@ export default function JodaMemory() {
   const handleMultiplayerStartGame = () => {
     if (!socketRef.current || !roomId || !isHost) return;
 
-    const shuffledCards = shuffleCards(difficulty);
-    const cardsData = shuffledCards.map(card => ({
-      iconName: card.iconName,
-    }));
-
-    socketRef.current.emit('startGame', { roomId, cards: cardsData });
+    // The server shuffles and deals; the host only picks the size of the deck
+    socketRef.current.emit('startGame', { roomId, difficulty });
   };
 
   const handleSendMessage = () => {
@@ -1356,7 +1396,7 @@ export default function JodaMemory() {
                   )}
                   {roomId && (
                     <button
-                      onClick={handleJoinGame}
+                      onClick={() => handleJoinGame()}
                       disabled={!playerName.trim()}
                       className="btn-gold sm:flex-1"
                     >
@@ -1370,6 +1410,54 @@ export default function JodaMemory() {
                     Back
                   </button>
                 </div>
+
+                {!roomId && (
+                  <form
+                    className="mt-6 border-t border-white/10 pt-5"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (playerName.trim() && codeInput.length === 6) handleJoinGame(codeInput);
+                    }}
+                  >
+                    <label htmlFor="memory-room-code" className="field-label">
+                      Have a code from a friend?
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="memory-room-code"
+                        type="text"
+                        inputMode="text"
+                        autoCapitalize="characters"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={codeInput}
+                        onChange={(e) => {
+                          setCodeError(null);
+                          setCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
+                        }}
+                        placeholder="6-character code"
+                        aria-describedby={codeError ? 'memory-room-code-error' : undefined}
+                        className="field min-w-0 flex-1 font-display tracking-[0.2em]"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!playerName.trim() || codeInput.length !== 6}
+                        className="btn-quiet shrink-0"
+                      >
+                        Join
+                      </button>
+                    </div>
+                    {codeError ? (
+                      <p id="memory-room-code-error" role="alert" className="mt-2 text-sm text-white">
+                        {codeError}
+                      </p>
+                    ) : (
+                      !playerName.trim() && codeInput.length === 6 && (
+                        <p className="mt-2 text-sm text-chalk">Add your name above to join.</p>
+                      )
+                    )}
+                  </form>
+                )}
               </div>
             </section>
           ) : gameMode === 'multiplayer' && isInLobby ? (
@@ -1386,8 +1474,10 @@ export default function JodaMemory() {
                       {playerLeftNotice.name} left {playerLeftNotice.duringGame ? 'the game' : 'the room'}
                     </p>
                     <p className="mt-1 text-sm text-chalk">
-                      {playerLeftNotice.duringGame
-                        ? 'The game ended and nothing was saved. Send the link again to play with someone new.'
+                      {playerLeftNotice.forfeit
+                        ? 'You win by forfeit, and it counts on the leaderboard. Send the link again to play with someone new.'
+                        : playerLeftNotice.duringGame
+                        ? 'The game ended before anyone flipped a card, so nothing was saved. Send the link again to play with someone new.'
                         : 'Send the link again to play with someone new.'}
                     </p>
                   </div>
@@ -2010,6 +2100,7 @@ function SoloSaveStatus({
           </Link>
         </p>
       )}
+      {save.status === 'saved' && <LeaderboardNameForm />}
       {save.status === 'signed-out' && (
         <p className="text-chalk">
           Your time wasn&apos;t saved because you aren&apos;t signed in.{' '}
@@ -2064,5 +2155,68 @@ function ReconnectingNotice({ name }: { name: string }) {
         <span className="font-semibold text-white">{name}</span> lost their connection. Waiting for them to come back…
       </p>
     </div>
+  );
+}
+
+// Guests are created as "Guest 1a2b3c4d"; those names shouldn't be prefilled or shown as a choice
+function isDefaultGuestName(name: string | null | undefined): boolean {
+  return !name || /^Guest [0-9a-f]{8}$/i.test(name);
+}
+
+// Lets a guest with an auto-generated name put a real name on the leaderboard right after a win
+function LeaderboardNameForm() {
+  const { user, refreshSession } = useAuth();
+  const [name, setName] = useState('');
+  const [state, setState] = useState<{ status: 'idle' | 'saving' | 'saved' } | { status: 'error'; message: string }>({ status: 'idle' });
+  if (!user || (!isDefaultGuestName(user.name) && state.status !== 'saved')) return null;
+  if (state.status === 'saved') {
+    return <p className="mt-2 text-chalk" aria-live="polite">Saved. The leaderboard now shows {user.name}.</p>;
+  }
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setState({ status: 'saving' });
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/me`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setState({ status: 'error', message: body.error ?? "Couldn't save your name. Try again." });
+        return;
+      }
+      await refreshSession();
+      setState({ status: 'saved' });
+    } catch {
+      setState({ status: 'error', message: "Couldn't save your name. Check your connection and try again." });
+    }
+  };
+
+  return (
+    <form onSubmit={save} className="mt-3 border-t border-white/10 pt-3">
+      <label htmlFor="leaderboard-name" className="field-label">
+        Add your name to the leaderboard
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="leaderboard-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={20}
+          autoComplete="nickname"
+          placeholder={user.name}
+          className="field min-w-0 flex-1 py-2"
+        />
+        <button type="submit" disabled={name.trim().length < 2 || state.status === 'saving'} className="btn-quiet btn-sm shrink-0">
+          {state.status === 'saving' ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+      {state.status === 'error' && (
+        <p role="alert" className="mt-2 text-white">{state.message}</p>
+      )}
+    </form>
   );
 }

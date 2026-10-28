@@ -101,7 +101,11 @@ function Podium({ entries, youId }: { entries: Entry[]; youId?: string }) {
           >
             <Medal className={`h-8 w-8 ${MEDAL_ICON[rank]}`} aria-hidden="true" />
             <p className="mt-1 text-sm font-semibold text-ink-soft">{MEDAL_NAME[rank]}</p>
-            <h3 className="title-md mt-2 max-w-full break-words">{e.name}</h3>
+            <h3 className="title-md mt-2 max-w-full break-words">
+              <Link href={`/profile/${e.userId}`} className="underline-offset-2 hover:underline">
+                {e.name}
+              </Link>
+            </h3>
             {(e.isGuest || e.userId === youId) && (
               <p className="mt-1 flex flex-wrap justify-center gap-1.5 text-xs font-semibold text-ink-soft">
                 {e.isGuest && <span className="rounded-full bg-ink/10 px-2 py-0.5">Guest</span>}
@@ -159,7 +163,9 @@ function RankedList({ entries, tab, youId }: { entries: Entry[]; tab: Tab; youId
             >
               <div className="font-display text-lg font-bold">{e.rank}</div>
               <div className="min-w-0">
-                <span className="break-words font-semibold">{e.name}</span>
+                <Link href={`/profile/${e.userId}`} className="break-words font-semibold underline-offset-2 hover:underline">
+                  {e.name}
+                </Link>
                 {e.isGuest && <span className="chip ml-2 px-2 py-0.5 text-xs">Guest</span>}
                 {isYou && <span className="chip ml-2 px-2 py-0.5 text-xs">You</span>}
                 <p className="text-xs text-chalk sm:hidden">
