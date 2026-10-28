@@ -187,7 +187,8 @@ export default function JodaMemory() {
   const { user, refreshSession } = useAuth();
   // Online lobby: browse players who aren't in a room and send/receive game requests
   const [showOnline, setShowOnline] = useState(false);
-  const [onlineCount, setOnlineCount] = useState(0);
+  // How many other players are listed as online right now
+  const [othersOnline, setOthersOnline] = useState(0);
   const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; expiresAt: number } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteNow, setInviteNow] = useState(() => Date.now());
@@ -332,9 +333,12 @@ export default function JodaMemory() {
   // Being listed as online: whenever this page is open and we're not in a room (debounced while typing a name)
   const onlineName = (playerName.trim() || (user && !isDefaultGuestName(user.name) ? user.name : '') || user?.name || '').slice(0, 20);
   useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    const send = () => socket.emit('presence:update', { available: !inRoomNow, name: onlineName || undefined, playerKey: getPlayerKey() }, () => {});
+    // The shared page socket, even if the connection effect below hasn't opened it yet on this first render
+    const socket = getSocket();
+    const send = () =>
+      socket.emit('presence:update', { available: !inRoomNow, name: onlineName || undefined, playerKey: getPlayerKey() }, () =>
+        socket.emit('presence:list', {}, (res: { players?: unknown[] }) => setOthersOnline(res?.players?.length ?? 0)),
+      );
     const timer = setTimeout(() => { if (socket.connected) send(); }, 400);
     socket.on('connect', send);
     return () => {
@@ -564,7 +568,10 @@ export default function JodaMemory() {
     // Coming back from another page within the site: the socket never dropped, so there is no 'connect' event
     if (socket.connected && !rejoinRef.current.inRoom) attemptRejoin();
 
-    socket.on('presence:changed', (data: { count: number }) => setOnlineCount(data?.count ?? 0));
+    // The broadcast count includes us; ask for the list so the number shown is everyone else
+    const refreshOthers = () =>
+      socket.emit('presence:list', {}, (res: { players?: unknown[] }) => setOthersOnline(res?.players?.length ?? 0));
+    socket.on('presence:changed', refreshOthers);
     socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; expiresAt: number }) => {
       setInviteError(null);
       setInviteNow(Date.now());
@@ -606,7 +613,7 @@ export default function JodaMemory() {
       socket.off('gamePaused');
       socket.off('chatMessage');
       socket.off('connect', attemptRejoin);
-      socket.off('presence:changed');
+      socket.off('presence:changed', refreshOthers);
       socket.off('invite:received');
       socket.off('invite:cancelled', dropInvite);
       socket.off('invite:expired', dropInvite);
@@ -1533,7 +1540,7 @@ export default function JodaMemory() {
                     <Globe className="h-6 w-6" aria-hidden="true" />
                   </span>
                   <span className="rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-ink-soft">
-                    {Math.max(0, onlineCount - 1)} online
+                    {othersOnline} online
                   </span>
                 </span>
                 <span className="title-md">Find players online</span>
