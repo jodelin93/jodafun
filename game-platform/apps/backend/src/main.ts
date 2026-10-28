@@ -27,7 +27,8 @@ async function bootstrap() {
   // Set global prefix
   app.setGlobalPrefix('api');
 
-  const port = process.env.BACKEND_PORT || 4000;
+  // Railway injects PORT; BACKEND_PORT is the local-dev override
+  const port = process.env.PORT || process.env.BACKEND_PORT || 4000;
   await app.listen(port);
   console.log(`🚀 Backend running on http://localhost:${port}`);
   console.log(`📊 Health check: http://localhost:${port}/api/health`);
