@@ -389,6 +389,11 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       return { success: false, error: 'Only host can start the game' };
     }
 
+    // New cards only between rounds: re-dealing mid-round would let the player who is behind wipe the board
+    if (room.roundActive) {
+      return { success: false, error: 'Round in progress' };
+    }
+
     // The server always deals; an older client's deck only tells us its size
     const difficulty = isDifficulty(data?.difficulty)
       ? data.difficulty

@@ -1733,7 +1733,12 @@ export default function JodaMemory() {
                 </div>
               )}
 
-              {cards.map((card, index) => (
+              {cards.map((card, index) => {
+                // With "show cards on their turn" off, the other player's flips stay face-down on this screen,
+                // including a pair they match (it fades out without being turned over)
+                const canSeeFlips = gameMode !== 'multiplayer' || isMyTurn || showOpponentMoves;
+                const faceUp = (card.isFlipped || card.isMatched) && canSeeFlips;
+                return (
                 <button
                   key={card.id}
                   type="button"
@@ -1741,8 +1746,8 @@ export default function JodaMemory() {
                   disabled={card.isMatched || card.isFlipped || !isMyTurn}
                   aria-label={`Card ${index + 1}, ${
                     card.isMatched
-                      ? `matched, ${card.iconName.replace('img', 'picture ')}`
-                      : card.isFlipped
+                      ? 'matched'
+                      : faceUp
                         ? `face up, ${card.iconName.replace('img', 'picture ')}`
                         : 'face down'
                   }`}
@@ -1758,7 +1763,7 @@ export default function JodaMemory() {
                   }`}
                 >
                   {/* Face-down cards are .is-flipped: the flip utilities show the patterned back when flipped */}
-                  <span className={`flip-inner block ${card.isFlipped || card.isMatched ? '' : 'is-flipped'}`}>
+                  <span className={`flip-inner block ${faceUp ? '' : 'is-flipped'}`}>
                     {/* Card Front */}
                     <span
                       className={`flip-face overflow-hidden rounded-card bg-card shadow-rest ${
@@ -1820,7 +1825,8 @@ export default function JodaMemory() {
                     <span className="flip-face flip-face-back card-back rounded-card" aria-hidden="true" />
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {/* Game Controls */}
@@ -1845,13 +1851,14 @@ export default function JodaMemory() {
                   {gamePaused ? 'Resume' : 'Pause'}
                 </button>
               )}
-              {(gameMode !== 'multiplayer' || isHost) && (
+              {/* In multiplayer new cards only come from "Next round"; the server rejects mid-round deals */}
+              {gameMode !== 'multiplayer' && (
                 <button
                   onClick={handleRestart}
                   className="btn-quiet btn-sm min-h-11"
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  {gameMode === 'multiplayer' ? 'Deal again' : 'Restart'}
+                  Restart
                 </button>
               )}
               {gameStarted && !gameWon && (
