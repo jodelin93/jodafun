@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { getSoundManager } from '../lib/sounds/soundManager';
 import SoundControls from './SoundControls';
 import SiteHeader from './ui/SiteHeader';
+import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
@@ -1243,6 +1244,8 @@ export default function JodaMemory() {
         /* Slim game bar: one row on desktop, two compact rows on phones */
         <header className="sticky top-0 z-40 border-b border-white/10 bg-felt-deep">
           <div className="page flex flex-wrap items-center gap-x-3 gap-y-1 py-2 sm:gap-x-5">
+            <Logo size="sm" compact />
+            <span className="h-6 w-px bg-white/15" aria-hidden="true" />
             <Link
               href="/games"
               className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-chalk transition hover:bg-white/5 hover:text-white"
