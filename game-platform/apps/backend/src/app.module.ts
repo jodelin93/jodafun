@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { EmailModule } from './email/email.module';
 import { GameModule } from './game/game.module';
 import { ScoresModule } from './scores/scores.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ScoresModule } from './scores/scores.module';
     EmailModule,
     GameModule,
     ScoresModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

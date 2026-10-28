@@ -7,13 +7,22 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
+import { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveSessionUser } from '../auth/session';
+import { RoomStore, type Difficulty, type GameRoom, type Player } from './room-store';
+import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
 
 // Pairs dealt per difficulty; a deck must contain exactly twice this many cards
 export const PAIRS_BY_DIFFICULTY = { easy: 4, medium: 8, hard: 12 } as const;
 const ROUND_WINS_TO_WIN_GAME = 4;
+// Socket ids from a previous process are prefixed so no live socket can match them
+const STALE_SOCKET_PREFIX = 'stale:';
+const TOO_MANY_REQUESTS = { success: false, error: 'Too many requests' };
+
+const isDifficulty = (value: unknown): value is Difficulty =>
+  value === 'easy' || value === 'medium' || value === 'hard';
 
 // How long a disconnected player keeps their seat before being removed
 const graceMs = (gameInProgress: boolean) =>
@@ -21,57 +30,83 @@ const graceMs = (gameInProgress: boolean) =>
     ? Number(process.env.ROOM_GRACE_GAME_MS) || 60_000
     : Number(process.env.ROOM_GRACE_LOBBY_MS) || 5 * 60_000;
 
-interface Player {
-  id: string;
-  name: string;
-  score: number;
-  isHost: boolean;
-  isReady: boolean;
-  socketId: string;
-  userId?: string | null; // set from the session cookie; null for anonymous sockets
-  playerKey?: string; // client-generated, stable per browser tab; never sent to clients
-  connected: boolean; // false while the player is in the disconnect grace period
-}
-
-interface GameRoom {
-  id: string;
-  hostId: string;
-  players: Player[];
-  difficulty: 'easy' | 'medium' | 'hard';
-  gameStarted: boolean;
-  currentPlayerIndex: number;
-  cards: any[];
-  flippedCards: number[];
-  currentRound: number;
-  roundWins: number[]; // [player1RoundWins, player2RoundWins]
-  showOpponentMoves: boolean; // Whether players can see opponent's moves
-  // Server-side scoring state (never sent to clients)
-  gameActive: boolean; // true from the first deal until the game ends or is abandoned
-  roundActive: boolean; // true while the current deal still has unmatched cards
-  matchedCards: number[];
-  roundPairs: number[]; // pairs per player in the current round
-  totalPairs: number[]; // pairs per player across the whole game
-  gameDifficulty: 'easy' | 'medium' | 'hard';
-  gameStartedAt: Date | null;
-}
-
 @WebSocketGateway({
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
   },
 })
-export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private rooms: Map<string, GameRoom> = new Map();
   // userId per socket, resolved from the session cookie on connect (null = anonymous)
   private socketUsers: Map<string, Promise<string | null>> = new Map();
   // Removal timers for disconnected players in their grace period
   private graceTimers: Map<Player, NodeJS.Timeout> = new Map();
+  private flipLimiter = new RateLimiter(10, 1000);
+  private joinLimiter = new RateLimiter(20, 60_000);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private rooms: RoomStore,
+  ) {}
+
+  // Rooms persisted by a previous process come back with every player disconnected
+  async onModuleInit() {
+    let restored: GameRoom[];
+    try {
+      restored = await this.rooms.loadAll();
+    } catch (error) {
+      console.error('Failed to restore rooms from Redis:', error);
+      return;
+    }
+
+    const now = Date.now();
+    for (const room of restored) {
+      this.adoptRoom(room, now);
+    }
+    if (this.rooms.durable) {
+      console.log(`Restored ${restored.length} room(s) from Redis`);
+    }
+  }
+
+  // Takes over a room written by another process: its sockets are not ours, so every
+  // player is disconnected (stale socket ids) until they rejoin within the grace period
+  private adoptRoom(room: GameRoom, now: number) {
+    if (room.players.length === 0) {
+      this.rooms.delete(room.id);
+      return;
+    }
+    for (const player of room.players) {
+      if (!player.socketId.startsWith(STALE_SOCKET_PREFIX)) {
+        const staleId = STALE_SOCKET_PREFIX + player.socketId;
+        if (room.hostId === player.socketId) room.hostId = staleId;
+        player.socketId = staleId;
+      }
+      if (player.connected) {
+        player.connected = false;
+        player.disconnectedAt = now;
+      }
+    }
+    this.rooms.save(room);
+    room.players.forEach(player => this.startGraceTimer(room, player));
+  }
+
+  // During a deploy the previous process may still write rooms after this one booted.
+  // When nobody is connected to a room here, prefer a newer copy from Redis.
+  private async latestRoom(roomId: string): Promise<GameRoom | undefined> {
+    const cached = this.rooms.get(roomId);
+    if (!this.rooms.durable || cached?.players.some(p => p.connected)) return cached;
+    const stored = await this.rooms.fetch(roomId).catch(error => {
+      console.error(`Failed to read room ${roomId} from Redis:`, error);
+      return null;
+    });
+    if (!stored || (cached && stored.updatedAt <= cached.updatedAt)) return cached;
+    cached?.players.forEach(player => this.clearGraceTimer(player));
+    this.adoptRoom(stored, Date.now());
+    return this.rooms.get(roomId);
+  }
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
@@ -89,26 +124,24 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
     this.socketUsers.delete(client.id);
+    this.flipLimiter.forget(client.id);
+    this.joinLimiter.forget(client.id);
 
     // Keep the seat for a grace period so the player can rejoin from a new socket
-    for (const [roomId, room] of this.rooms.entries()) {
+    for (const room of this.rooms.values()) {
       const player = room.players.find(p => p.socketId === client.id);
       if (!player) continue;
 
       player.connected = false;
-      this.server.to(roomId).emit('playerDisconnected', {
+      player.disconnectedAt = Date.now();
+      this.server.to(room.id).emit('playerDisconnected', {
         playerId: player.id,
         playerName: player.name,
         players: this.publicPlayers(room),
       });
 
-      const timer = setTimeout(() => {
-        this.graceTimers.delete(player);
-        if (this.rooms.get(roomId) === room && room.players.includes(player) && !player.connected) {
-          this.removePlayer(roomId, room, player.socketId);
-        }
-      }, graceMs(room.gameStarted && room.gameActive));
-      this.graceTimers.set(player, timer);
+      this.startGraceTimer(room, player);
+      this.rooms.save(room);
     }
   }
 
@@ -117,7 +150,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; playerKey: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data?.roomId);
+    if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = await this.latestRoom(roomId);
     if (!room) {
       return { success: false, error: 'Room not found' };
     }
@@ -135,23 +170,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // If the old socket is somehow still alive, stop it receiving this room's events
     if (player.socketId !== client.id) {
-      this.server.in(player.socketId).socketsLeave(data.roomId);
+      this.server.in(player.socketId).socketsLeave(roomId);
     }
     if (room.hostId === player.socketId) {
       room.hostId = client.id;
     }
     player.socketId = client.id;
     player.connected = true;
+    player.disconnectedAt = null;
     player.userId = userId;
-    client.join(data.roomId);
+    client.join(roomId);
+    this.rooms.save(room);
 
-    this.server.to(data.roomId).emit('playerReconnected', {
+    this.server.to(roomId).emit('playerReconnected', {
       playerId: player.id,
       playerName: player.name,
       players: this.publicPlayers(room),
     });
 
-    console.log(`Player ${player.name} rejoined room ${data.roomId}`);
+    console.log(`Player ${player.name} rejoined room ${roomId}`);
 
     return {
       success: true,
@@ -180,10 +217,12 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('createGame')
   async handleCreateGame(
     @MessageBody()
-    data: { playerName: string; difficulty: 'easy' | 'medium' | 'hard'; playerKey?: string },
+    data: { playerName: string; difficulty: Difficulty; playerKey?: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const roomId = this.generateRoomId();
+    if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
+    const roomId = generateRoomCode(code => this.rooms.has(code));
+    const difficulty = isDifficulty(data?.difficulty) ? data.difficulty : 'easy';
 
     const host: Player = {
       id: client.id,
@@ -195,13 +234,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId: await this.getSocketUserId(client.id),
       playerKey: typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
       connected: true,
+      disconnectedAt: null,
     };
 
+    const now = Date.now();
     const room: GameRoom = {
       id: roomId,
       hostId: client.id,
       players: [host],
-      difficulty: data.difficulty,
+      difficulty,
       gameStarted: false,
       currentPlayerIndex: 0,
       cards: [],
@@ -211,14 +252,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       showOpponentMoves: true, // Default to showing moves
       gameActive: false,
       roundActive: false,
+      gameHasFlips: false,
       matchedCards: [],
       roundPairs: [0, 0],
       totalPairs: [0, 0],
-      gameDifficulty: data.difficulty,
+      gameDifficulty: difficulty,
       gameStartedAt: null,
+      createdAt: now,
+      updatedAt: now,
     };
 
-    this.rooms.set(roomId, room);
+    this.rooms.save(room);
     client.join(roomId);
 
     console.log(`Game created: ${roomId} by ${data.playerName}`);
@@ -235,8 +279,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; playerName: string; playerKey?: string },
     @ConnectedSocket() client: Socket,
   ) {
+    if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
     const userId = await this.getSocketUserId(client.id);
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = await this.latestRoom(roomId);
 
     if (!room) {
       return {
@@ -269,18 +315,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId,
       playerKey: typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
       connected: true,
+      disconnectedAt: null,
     };
 
     room.players.push(player);
-    client.join(data.roomId);
+    this.rooms.save(room);
+    client.join(roomId);
 
     // Notify all players in the room
-    this.server.to(data.roomId).emit('playerJoined', {
+    this.server.to(roomId).emit('playerJoined', {
       player: this.publicPlayer(player),
       players: this.publicPlayers(room),
     });
 
-    console.log(`${data.playerName} joined game: ${data.roomId}`);
+    console.log(`${data.playerName} joined game: ${roomId}`);
 
     return {
       success: true,
@@ -293,7 +341,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -302,9 +351,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const player = room.players.find(p => p.socketId === client.id);
     if (player) {
       player.isReady = true;
+      this.rooms.save(room);
 
       // Notify all players
-      this.server.to(data.roomId).emit('playerReadyUpdate', {
+      this.server.to(roomId).emit('playerReadyUpdate', {
         playerId: client.id,
         players: this.publicPlayers(room),
       });
@@ -312,7 +362,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Check if all players are ready
       const allReady = room.players.every(p => p.isReady) && room.players.length === 2;
       if (allReady) {
-        this.server.to(data.roomId).emit('allPlayersReady', {
+        this.server.to(roomId).emit('allPlayersReady', {
           message: 'All players ready! Starting game...',
         });
       }
@@ -325,10 +375,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('startGame')
   handleStartGame(
-    @MessageBody() data: { roomId: string; cards: any[] },
+    @MessageBody() data: { roomId: string; difficulty?: Difficulty; cards?: any[] },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -338,25 +389,26 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { success: false, error: 'Only host can start the game' };
     }
 
-    const deckDifficulty = this.getDeckDifficulty(data.cards);
-    if (!deckDifficulty) {
-      return { success: false, error: 'Invalid deck' };
-    }
+    // The server always deals; an older client's deck only tells us its size
+    const difficulty = isDifficulty(data?.difficulty)
+      ? data.difficulty
+      : (this.getDeckDifficulty(data?.cards) ?? room.difficulty);
 
     if (room.gameActive) {
       // Every deal after the first one in the same game is a new round
       room.currentRound += 1;
     } else {
       room.gameActive = true;
+      room.gameHasFlips = false;
       room.currentRound = 1;
       room.roundWins = [0, 0];
       room.totalPairs = [0, 0];
-      room.gameDifficulty = deckDifficulty;
+      room.gameDifficulty = difficulty;
       room.gameStartedAt = new Date();
     }
 
     room.gameStarted = true;
-    room.cards = data.cards;
+    room.cards = dealDeck(PAIRS_BY_DIFFICULTY[difficulty]);
     room.currentPlayerIndex = 0;
     room.flippedCards = [];
     room.matchedCards = [];
@@ -367,11 +419,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     room.players.forEach(p => {
       p.score = 0;
     });
+    this.rooms.save(room);
 
-    this.server.to(data.roomId).emit('gameStarted', {
+    this.server.to(roomId).emit('gameStarted', {
       cards: room.cards,
       currentPlayerIndex: room.currentPlayerIndex,
       players: this.publicPlayers(room),
+      difficulty,
     });
 
     return { success: true };
@@ -382,7 +436,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; showOpponentMoves: boolean },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -395,9 +450,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Update the setting
     room.showOpponentMoves = data.showOpponentMoves;
+    this.rooms.save(room);
 
     // Broadcast the change to all players in the lobby
-    this.server.to(data.roomId).emit('visibilityChanged', {
+    this.server.to(roomId).emit('visibilityChanged', {
       showOpponentMoves: room.showOpponentMoves,
     });
 
@@ -409,14 +465,15 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; paused: boolean },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
     }
 
     // Broadcast pause state to all players in the room
-    this.server.to(data.roomId).emit('gamePaused', {
+    this.server.to(roomId).emit('gamePaused', {
       paused: data.paused,
       pausedBy: client.id,
     });
@@ -429,7 +486,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; message: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -443,7 +501,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Broadcast the message to all players in the room
-    this.server.to(data.roomId).emit('chatMessage', {
+    this.server.to(roomId).emit('chatMessage', {
       playerName: sender.name,
       playerId: client.id,
       message: data.message,
@@ -458,7 +516,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; cardId: number },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    if (!this.flipLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -482,9 +542,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     room.flippedCards.push(cardId);
+    room.gameHasFlips = true;
 
     // Broadcast to all players in the room
-    this.server.to(data.roomId).emit('cardFlipped', {
+    this.server.to(roomId).emit('cardFlipped', {
       cardId: data.cardId,
       playerId: client.id,
     });
@@ -505,6 +566,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.endRound(room);
       }
     }
+    this.rooms.save(room);
 
     return { success: true };
   }
@@ -514,7 +576,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; cardIds: number[] },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -523,9 +586,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const playerIndex = room.players.findIndex(p => p.socketId === client.id);
     if (playerIndex !== -1) {
       room.players[playerIndex].score += 1;
+      this.rooms.save(room);
     }
 
-    this.server.to(data.roomId).emit('matchFound', {
+    this.server.to(roomId).emit('matchFound', {
       cardIds: data.cardIds,
       playerId: client.id,
       players: this.publicPlayers(room),
@@ -539,7 +603,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; cardIds: number[] },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -547,8 +612,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Switch turn
     room.currentPlayerIndex = (room.currentPlayerIndex + 1) % room.players.length;
+    this.rooms.save(room);
 
-    this.server.to(data.roomId).emit('noMatch', {
+    this.server.to(roomId).emit('noMatch', {
       cardIds: data.cardIds,
       currentPlayerIndex: room.currentPlayerIndex,
     });
@@ -561,13 +627,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
     }
 
-    this.server.to(data.roomId).emit('gameWon', {
+    this.server.to(roomId).emit('gameWon', {
       players: this.publicPlayers(room),
     });
 
@@ -579,20 +646,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.rooms.get(data.roomId);
+    const roomId = normalizeRoomCode(data?.roomId);
+    const room = this.rooms.get(roomId);
 
     if (!room) {
       return { success: false, error: 'Room not found' };
     }
 
     // Leave the socket room, then remove the player and notify the others
-    client.leave(data.roomId);
-    this.removePlayer(data.roomId, room, client.id);
+    client.leave(roomId);
+    this.removePlayer(roomId, room, client.id);
 
     return { success: true };
   }
 
-  // Shared by leaveRoom and handleDisconnect
+  // Shared by leaveRoom and the grace timer
   private removePlayer(roomId: string, room: GameRoom, socketId: string) {
     const playerIndex = room.players.findIndex(p => p.socketId === socketId);
     if (playerIndex === -1) return;
@@ -600,9 +668,31 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const leavingPlayer = room.players[playerIndex];
     this.clearGraceTimer(leavingPlayer);
     const gameInProgress = room.gameStarted && room.gameActive;
+
+    // Leaving an active game after the first flip forfeits it to the player who stayed.
+    // If both are gone, the one who disconnected later counts as having stayed.
+    let winner: Player | null = null;
+    if (gameInProgress && room.gameHasFlips && room.players.length === 2) {
+      const other = room.players[playerIndex === 0 ? 1 : 0];
+      const leftAt = leavingPlayer.disconnectedAt ?? Date.now();
+      if (other.connected || (other.disconnectedAt ?? 0) > leftAt) winner = other;
+    }
+    if (winner) {
+      const startedAt = room.gameStartedAt ?? new Date();
+      this.saveGameResult(
+        [...room.players],
+        playerIndex === 0 ? 1 : 0,
+        [...room.roundWins],
+        [...room.totalPairs],
+        room.gameDifficulty,
+        startedAt,
+        true,
+      ).catch(error => console.error(`Failed to save forfeit for room ${roomId}:`, error));
+    }
+
     room.players.splice(playerIndex, 1);
 
-    // A game in progress is abandoned: nothing is saved and the room goes back to the lobby
+    // The game is over either way and the room goes back to the lobby
     if (room.gameStarted) {
       this.resetGameState(room);
       room.gameStarted = false;
@@ -619,20 +709,25 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       playerName: leavingPlayer.name,
       players: this.publicPlayers(room),
       gameInProgress,
+      forfeit: winner !== null,
+      winnerId: winner?.id ?? null,
     });
 
     // If room is empty, delete it
     if (room.players.length === 0) {
       this.rooms.delete(roomId);
       console.log(`Room ${roomId} deleted (empty)`);
-    } else if (leavingPlayer.isHost) {
-      // If host left, assign new host
-      room.players[0].isHost = true;
-      room.hostId = room.players[0].socketId;
-      this.server.to(roomId).emit('newHost', {
-        hostId: room.players[0].socketId,
-        players: this.publicPlayers(room),
-      });
+    } else {
+      if (leavingPlayer.isHost) {
+        // If host left, assign new host
+        room.players[0].isHost = true;
+        room.hostId = room.players[0].socketId;
+        this.server.to(roomId).emit('newHost', {
+          hostId: room.players[0].socketId,
+          players: this.publicPlayers(room),
+        });
+      }
+      this.rooms.save(room);
     }
 
     console.log(`Player ${leavingPlayer.name} left room ${roomId}`);
@@ -667,6 +762,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     totalPairs: number[],
     difficulty: string,
     startedAt: Date,
+    forfeit = false,
   ) {
     // Only head-to-head games count
     if (players.length !== 2) return;
@@ -682,7 +778,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         player1Id: userIds[0],
         player2Id: userIds[1],
         winnerId: userIds[winnerIndex],
-        settings: { difficulty, roundWins },
+        settings: forfeit ? { difficulty, roundWins, forfeit: true } : { difficulty, roundWins },
         startedAt,
         completedAt: new Date(),
         matchHistory: {
@@ -700,13 +796,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       },
     });
     console.log(
-      `Saved joda-memory game: winner ${players[winnerIndex]?.name}, loser ${players[loserIndex]?.name}`,
+      `Saved joda-memory game${forfeit ? ' (forfeit)' : ''}: winner ${players[winnerIndex]?.name}, loser ${players[loserIndex]?.name}`,
     );
   }
 
   private resetGameState(room: GameRoom) {
     room.gameActive = false;
     room.roundActive = false;
+    room.gameHasFlips = false;
     room.currentRound = 1;
     room.roundWins = [0, 0];
     room.roundPairs = [0, 0];
@@ -717,10 +814,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     room.gameStartedAt = null;
   }
 
-  // A valid deck is 4, 8 or 12 pairs where every iconName appears exactly twice
-  private getDeckDifficulty(cards: any[]): 'easy' | 'medium' | 'hard' | null {
+  // A valid legacy deck is 4, 8 or 12 pairs where every iconName appears exactly twice
+  private getDeckDifficulty(cards: any): Difficulty | null {
     if (!Array.isArray(cards)) return null;
-    const difficulty = (Object.keys(PAIRS_BY_DIFFICULTY) as Array<keyof typeof PAIRS_BY_DIFFICULTY>).find(
+    const difficulty = (Object.keys(PAIRS_BY_DIFFICULTY) as Difficulty[]).find(
       d => PAIRS_BY_DIFFICULTY[d] * 2 === cards.length,
     );
     if (!difficulty) return null;
@@ -733,6 +830,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return [...counts.values()].every(c => c === 2) ? difficulty : null;
   }
 
+  private startGraceTimer(room: GameRoom, player: Player) {
+    this.clearGraceTimer(player);
+    const timer = setTimeout(() => {
+      this.graceTimers.delete(player);
+      if (this.rooms.get(room.id) === room && room.players.includes(player) && !player.connected) {
+        this.removePlayer(room.id, room, player.socketId);
+      }
+    }, graceMs(room.gameStarted && room.gameActive));
+    this.graceTimers.set(player, timer);
+  }
+
   private clearGraceTimer(player: Player) {
     const timer = this.graceTimers.get(player);
     if (timer) {
@@ -743,7 +851,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // playerKey lets a socket take over a seat, so it is never sent to clients
   private publicPlayer(player: Player) {
-    const { playerKey, ...rest } = player;
+    const { playerKey, disconnectedAt, ...rest } = player;
     return rest;
   }
 
@@ -753,10 +861,6 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private async getSocketUserId(socketId: string): Promise<string | null> {
     return (await this.socketUsers.get(socketId)) ?? null;
-  }
-
-  private generateRoomId(): string {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
   }
 
   private sanitizeRoom(room: GameRoom) {
