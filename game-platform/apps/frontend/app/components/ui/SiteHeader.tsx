@@ -25,6 +25,7 @@ export default function SiteHeader() {
       method: 'POST',
       credentials: 'include',
     });
+    clearCurrentRoom();
     await refreshSession();
     router.push('/');
   };

@@ -129,6 +129,43 @@ export class AuthController {
     }
   }
 
+  // Handles both guest sessions (raw token cookie set by createGuest) and better-auth sessions
+  // (possibly "token.signature", possibly the __Secure- cookie name); better-auth's own sign-out
+  // doesn't recognise the guest cookie, which left guests signed in after "Sign out"
+  @Post('sign-out')
+  async signOut(@Req() req: any, @Res() res: any) {
+    const cookieNames = ['better-auth.session_token', '__Secure-better-auth.session_token'];
+    const tokens = cookieNames
+      .map((name) => req.cookies?.[name])
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .flatMap((value) => [value, value.split('.')[0]]);
+
+    try {
+      if (tokens.length > 0) {
+        await this.guestAuthService['prisma'].session.deleteMany({
+          where: { token: { in: tokens } },
+        });
+      }
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      path: '/',
+    };
+    for (const name of cookieNames) {
+      res.clearCookie(name, cookieOptions);
+    }
+    // better-auth's short-lived session cache cookie would otherwise keep answering for a few minutes
+    res.clearCookie('better-auth.session_data', cookieOptions);
+    res.clearCookie('__Secure-better-auth.session_data', cookieOptions);
+
+    return res.json({ success: true });
+  }
+
   @All('*')
   async handleAuth(@Req() req: any, @Res() res: any) {
     // Convert Express request to Web Request
