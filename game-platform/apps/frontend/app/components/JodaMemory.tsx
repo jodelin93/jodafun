@@ -128,7 +128,7 @@ const IMAGE_POOL = [
   { name: 'img62', Icon: Cpu, imageUrl: 'https://picsum.photos/id/83/400/400', color: 'from-emerald-400 to-green-500' },
   { name: 'img63', Icon: Cherry, imageUrl: 'https://picsum.photos/id/84/400/400', color: 'from-red-400 to-orange-500' },
   { name: 'img64', Icon: Crown, imageUrl: 'https://picsum.photos/id/85/400/400', color: 'from-violet-400 to-purple-500' },
-  { name: 'img65', Icon: Gem, imageUrl: 'https://picsum.photos/id/86/400/400', color: 'from-sky-400 to-blue-500' },
+  { name: 'img65', Icon: Gem, imageUrl: 'https://picsum.photos/id/92/400/400', color: 'from-sky-400 to-blue-500' },
   { name: 'img66', Icon: Star, imageUrl: 'https://picsum.photos/id/87/400/400', color: 'from-fuchsia-400 to-rose-500' },
   { name: 'img67', Icon: Heart, imageUrl: 'https://picsum.photos/id/88/400/400', color: 'from-lime-400 to-green-500' },
   { name: 'img68', Icon: Trophy, imageUrl: 'https://picsum.photos/id/89/400/400', color: 'from-orange-400 to-yellow-500' },
@@ -150,6 +150,8 @@ export default function JodaMemory() {
   const [gameMode, setGameMode] = useState<GameMode>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [cards, setCards] = useState<Card[]>([]);
+  // Pictures that failed to load, by name; both cards of that pair show the same icon instead
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [flippedCards, setFlippedCards] = useState<number[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
@@ -339,6 +341,17 @@ export default function JodaMemory() {
     const refresh = setInterval(() => saveCurrentRoom(roomId), 20000);
     return () => clearInterval(refresh);
   }, [inRoomNow, roomId]);
+
+  // Load every picture as soon as a deck is dealt, so a flipped card shows its real picture straight away
+  const deckSignature = cards.map(c => c.iconName).join(',');
+  useEffect(() => {
+    const urls = new Set(cards.map(c => c.imageUrl).filter((u): u is string => Boolean(u)));
+    urls.forEach(url => {
+      const image = new Image();
+      image.src = url;
+    });
+    // Only re-run when the deck changes, not on every flip
+  }, [deckSignature]);
 
   // Being listed as online: whenever this page is open and we're not in a room (debounced while typing a name)
   const onlineName = (playerName.trim() || (user && !isDefaultGuestName(user.name) ? user.name : '') || user?.name || '').slice(0, 20);
@@ -2019,7 +2032,8 @@ export default function JodaMemory() {
                 const faceUp = (card.isFlipped || card.isMatched) && canSeeFlips;
                 return (
                 <button
-                  key={card.id}
+                  // Keyed by picture too: a new deal remounts the slot instead of reusing an element still showing the old picture
+                  key={`${card.id}-${card.iconName}`}
                   type="button"
                   onClick={() => handleCardClick(card.id)}
                   disabled={card.isMatched || card.isFlipped || !isMyTurn}
@@ -2052,20 +2066,22 @@ export default function JodaMemory() {
                     >
                       {card.imageUrl ? (
                         <span className={`relative block h-full w-full ${card.isMatched ? 'opacity-60' : ''}`}>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={card.imageUrl}
-                            alt=""
-                            className="h-full w-full object-cover"
-                            onError={(e) => {
-                              // Fallback to icon on image load error
-                              e.currentTarget.style.display = 'none';
-                              const fallback = e.currentTarget.nextElementSibling as HTMLElement;
-                              if (fallback) fallback.style.display = 'flex';
-                            }}
-                          />
-                          {/* Fallback Icon Container (hidden by default) */}
-                          <span className="absolute inset-0 hidden items-center justify-center bg-card">
+                          {!brokenImages.has(card.iconName) && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={card.imageUrl}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              // Recorded per picture, so both cards of a pair switch to the same icon together
+                              onError={() => setBrokenImages(prev => new Set(prev).add(card.iconName))}
+                            />
+                          )}
+                          {/* Icon shown when this picture can't load */}
+                          <span
+                            className={`absolute inset-0 items-center justify-center bg-card ${
+                              brokenImages.has(card.iconName) ? 'flex' : 'hidden'
+                            }`}
+                          >
                             <span className={`rounded-xl bg-gradient-to-br p-2.5 sm:p-3 ${card.color}`}>
                               <card.Icon
                                 className={`${
