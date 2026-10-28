@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Medal } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useT } from '../i18n/I18nProvider';
+import { homeMessages } from '../i18n/messages/home';
 import { useGuestPlay } from '../lib/useGuestPlay';
 import { fetchFriendsLeaderboard, type FriendsEntry, type Period } from '../lib/leaderboard';
 import SiteHeader from '../components/ui/SiteHeader';
@@ -14,16 +16,16 @@ import Loading from '../components/ui/Loading';
 // Only games played with a friend count here, and only once they reached round 4 (the server filters)
 type Entry = FriendsEntry;
 
-const PERIODS: { id: Period; label: string }[] = [
-  { id: 'day', label: 'Today' },
-  { id: 'week', label: 'This week' },
-  { id: 'month', label: 'This month' },
-  { id: 'all', label: 'All time' },
-];
+const PERIODS = [
+  { id: 'day', label: 'periodDay' },
+  { id: 'week', label: 'periodWeek' },
+  { id: 'month', label: 'periodMonth' },
+  { id: 'all', label: 'periodAll' },
+] as const;
 
 const MEDAL_RING = { 1: 'ring-[#FFC23D]', 2: 'ring-[#C9D1D3]', 3: 'ring-[#D08A52]' } as const;
 const MEDAL_ICON = { 1: 'text-[#B9800A]', 2: 'text-[#6B7678]', 3: 'text-[#A8602B]' } as const;
-const MEDAL_NAME = { 1: '1st place', 2: '2nd place', 3: '3rd place' } as const;
+const MEDAL_NAME = { 1: 'place1', 2: 'place2', 3: 'place3' } as const;
 
 const COLS = 'grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[3rem_1fr_5rem_5rem_5rem]';
 
@@ -34,7 +36,7 @@ function Segmented<T extends string>({
   onChange,
 }: {
   label: string;
-  options: { id: T; label: string }[];
+  options: readonly { id: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
 }) {
@@ -64,9 +66,12 @@ function Segmented<T extends string>({
 }
 
 function Podium({ entries, youId }: { entries: Entry[]; youId?: string }) {
+  const t = useT(homeMessages);
+  const count = (n: number, one: 'gameCountOne' | 'winCountOne', other: 'gameCountOther' | 'winCountOther') =>
+    t(n === 1 ? one : other, { n });
   const top = entries.slice(0, 3);
   return (
-    <ol className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end" aria-label="Top three players">
+    <ol className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end" aria-label={t('topThree')}>
       {top.map((e, i) => {
         const rank = (i + 1) as 1 | 2 | 3;
         return (
@@ -77,7 +82,7 @@ function Podium({ entries, youId }: { entries: Entry[]; youId?: string }) {
             }`}
           >
             <Medal className={`h-8 w-8 ${MEDAL_ICON[rank]}`} aria-hidden="true" />
-            <p className="mt-1 text-sm font-semibold text-ink-soft">{MEDAL_NAME[rank]}</p>
+            <p className="mt-1 text-sm font-semibold text-ink-soft">{t(MEDAL_NAME[rank])}</p>
             <h3 className="title-md mt-2 max-w-full break-words">
               <Link href={`/profile/${e.userId}`} className="underline-offset-2 hover:underline">
                 {e.name}
@@ -85,14 +90,14 @@ function Podium({ entries, youId }: { entries: Entry[]; youId?: string }) {
             </h3>
             {(e.isGuest || e.userId === youId) && (
               <p className="mt-1 flex flex-wrap justify-center gap-1.5 text-xs font-semibold text-ink-soft">
-                {e.isGuest && <span className="rounded-full bg-ink/10 px-2 py-0.5">Guest</span>}
-                {e.userId === youId && <span className="rounded-full bg-ink/10 px-2 py-0.5">You</span>}
+                {e.isGuest && <span className="rounded-full bg-ink/10 px-2 py-0.5">{t('guest')}</span>}
+                {e.userId === youId && <span className="rounded-full bg-ink/10 px-2 py-0.5">{t('you')}</span>}
               </p>
             )}
             <p className="mt-2 font-display text-3xl font-extrabold">{e.wins}</p>
-            <p className="text-sm text-ink-soft">{e.wins === 1 ? 'win' : 'wins'}</p>
+            <p className="text-sm text-ink-soft">{t(e.wins === 1 ? 'winOne' : 'winOther')}</p>
             <p className="mt-2 text-sm text-ink-soft">
-              {e.games} {e.games === 1 ? 'game' : 'games'}, {e.winRate}% won
+              {t('podiumStats', { games: count(e.games, 'gameCountOne', 'gameCountOther'), rate: e.winRate })}
             </p>
           </li>
         );
@@ -102,15 +107,16 @@ function Podium({ entries, youId }: { entries: Entry[]; youId?: string }) {
 }
 
 function RankedList({ entries, youId }: { entries: Entry[]; youId?: string }) {
+  const t = useT(homeMessages);
   const cols = COLS;
   return (
     <div className="panel mt-8 overflow-hidden">
       <div className={`grid ${cols} items-center gap-3 border-b border-table-rim px-4 py-3 text-sm text-chalk sm:px-5`}>
-        <div>Rank</div>
-        <div>Player</div>
-        <div className="text-right">Wins</div>
-        <div className="hidden text-right sm:block">Games</div>
-        <div className="hidden text-right sm:block">Win rate</div>
+        <div>{t('colRank')}</div>
+        <div>{t('colPlayer')}</div>
+        <div className="text-right">{t('colWins')}</div>
+        <div className="hidden text-right sm:block">{t('colGames')}</div>
+        <div className="hidden text-right sm:block">{t('colWinRate')}</div>
       </div>
       <ul className="divide-y divide-table-rim">
         {entries.map((e) => {
@@ -125,10 +131,10 @@ function RankedList({ entries, youId }: { entries: Entry[]; youId?: string }) {
                 <Link href={`/profile/${e.userId}`} className="break-words font-semibold underline-offset-2 hover:underline">
                   {e.name}
                 </Link>
-                {e.isGuest && <span className="chip ml-2 px-2 py-0.5 text-xs">Guest</span>}
-                {isYou && <span className="chip ml-2 px-2 py-0.5 text-xs">You</span>}
+                {e.isGuest && <span className="chip ml-2 px-2 py-0.5 text-xs">{t('guest')}</span>}
+                {isYou && <span className="chip ml-2 px-2 py-0.5 text-xs">{t('you')}</span>}
                 <p className="text-xs text-chalk sm:hidden">
-                  {`${e.wins} ${e.wins === 1 ? 'win' : 'wins'}, ${e.games} ${e.games === 1 ? 'game' : 'games'}`}
+                  {`${t(e.wins === 1 ? 'winCountOne' : 'winCountOther', { n: e.wins })}, ${t(e.games === 1 ? 'gameCountOne' : 'gameCountOther', { n: e.games })}`}
                 </p>
               </div>
               <div className="text-right font-semibold">{e.wins}</div>
@@ -143,8 +149,9 @@ function RankedList({ entries, youId }: { entries: Entry[]; youId?: string }) {
 }
 
 function SkeletonList() {
+  const t = useT(homeMessages);
   return (
-    <div className="panel mt-8 overflow-hidden" role="status" aria-label="Loading the leaderboard">
+    <div className="panel mt-8 overflow-hidden" role="status" aria-label={t('lbLoadingAria')}>
       <ul className="divide-y divide-table-rim">
         {Array.from({ length: 6 }, (_, i) => (
           <li key={i} className="flex items-center gap-3 px-4 py-3 sm:px-5">
@@ -159,6 +166,7 @@ function SkeletonList() {
 }
 
 function LeaderboardContent() {
+  const t = useT(homeMessages);
   const { user, isPending } = useAuth();
   const { play, loading: starting, error: playError } = useGuestPlay();
   const router = useRouter();
@@ -196,21 +204,21 @@ function LeaderboardContent() {
 
   return (
     <>
-      <h1 className="title-lg">Leaderboard</h1>
+      <h1 className="title-lg">{t('lbTitle')}</h1>
       <p className="mt-2 max-w-xl text-chalk">
-        Wins in games played with friends. A game counts once it reaches round 4.
+        {t('lbIntro')}
       </p>
 
       <div>
         <div className="panel mt-6 p-4 sm:p-5">
-          <Segmented label="Time frame" options={PERIODS} value={period} onChange={setPeriod} />
+          <Segmented label={t('timeFrame')} options={PERIODS.map((p) => ({ id: p.id, label: t(p.label) }))} value={period} onChange={setPeriod} />
         </div>
 
         {failed ? (
           <div className="panel mt-8 max-w-xl p-5 sm:p-6" role="alert">
-            <p className="text-chalk">Couldn&apos;t load the leaderboard. Check your connection and try again.</p>
+            <p className="text-chalk">{t('lbFailed')}</p>
             <button type="button" className="btn-quiet mt-4" onClick={() => setAttempt((n) => n + 1)}>
-              Try again
+              {t('tryAgain')}
             </button>
           </div>
         ) : entries === null ? (
@@ -218,10 +226,10 @@ function LeaderboardContent() {
         ) : entries.length === 0 ? (
           <div className="panel mt-8 max-w-xl p-5 sm:p-6">
             <p className="text-chalk">
-              No games with friends have reached round 4 in this period yet. Start a game and send your friend the link.
+              {t('lbEmpty')}
             </p>
             <button type="button" className="btn-gold mt-4" disabled={starting} onClick={() => play('/games/joda-memory')}>
-              Start a game
+              {t('startGame')}
             </button>
             {playError && (
               <p className="mt-3 text-sm text-chalk" role="alert">
@@ -239,25 +247,25 @@ function LeaderboardContent() {
 
       {(!user || isGuestUser) && (
         <div className="panel mt-8 max-w-xl p-5 sm:p-6">
-          <h2 className="title-md">Save your scores</h2>
+          <h2 className="title-md">{t('saveScores')}</h2>
           {isGuestUser ? (
             <>
-              <p className="mt-2 text-chalk">Create an account to keep your scores on any device.</p>
+              <p className="mt-2 text-chalk">{t('saveScoresGuest')}</p>
               <div className="mt-4 flex flex-wrap gap-3">
                 <Link href="/convert-account" className="btn-quiet">
-                  Create account
+                  {t('createAccountShort')}
                 </Link>
               </div>
             </>
           ) : (
             <>
-              <p className="mt-2 text-chalk">Create an account to keep your results and show up here later.</p>
+              <p className="mt-2 text-chalk">{t('saveScoresNew')}</p>
               <div className="mt-4 flex flex-wrap gap-3">
                 <Link href="/signup" className="btn-quiet">
-                  Create account
+                  {t('createAccountShort')}
                 </Link>
                 <Link href="/login" className="btn-quiet">
-                  Sign in
+                  {t('signIn')}
                 </Link>
               </div>
             </>

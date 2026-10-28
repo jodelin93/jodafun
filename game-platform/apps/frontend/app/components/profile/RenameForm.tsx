@@ -2,9 +2,12 @@
 
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { renameMe } from '../../lib/users';
+import { renameMe, ServerMessageError } from '../../lib/users';
+import { useT } from '../../i18n/I18nProvider';
+import { profileMessages, renameErrorKey } from '../../i18n/messages/profile';
 
 export default function RenameForm({ currentName }: { currentName: string }) {
+  const t = useT(profileMessages);
   const { refreshSession } = useAuth();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(currentName);
@@ -22,7 +25,12 @@ export default function RenameForm({ currentName }: { currentName: string }) {
       setOpen(false);
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save your name. Try again.");
+      if (err instanceof ServerMessageError) {
+        const key = renameErrorKey(err.message);
+        setError(key ? t(key) : err.message);
+      } else {
+        setError(t('saveNameFailed'));
+      }
     } finally {
       setSaving(false);
     }
@@ -33,7 +41,7 @@ export default function RenameForm({ currentName }: { currentName: string }) {
       {open ? (
         <form onSubmit={submit} className="max-w-md">
           <label htmlFor="rename" className="field-label">
-            Your name
+            {t('yourName')}
           </label>
           <input
             id="rename"
@@ -45,7 +53,7 @@ export default function RenameForm({ currentName }: { currentName: string }) {
             autoFocus
           />
           <p className="mt-1.5 text-sm text-chalk">
-            2 to 20 characters: letters, digits, spaces, hyphens, underscores and dots. Names can&apos;t start with Guest.
+            {t('nameRules')}
           </p>
           {error && (
             <p className="mt-2 text-sm font-semibold text-signal" role="alert">
@@ -54,7 +62,7 @@ export default function RenameForm({ currentName }: { currentName: string }) {
           )}
           <div className="mt-3 flex gap-3">
             <button type="submit" className="btn-gold btn-sm" disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? t('saving') : t('save')}
             </button>
             <button
               type="button"
@@ -65,7 +73,7 @@ export default function RenameForm({ currentName }: { currentName: string }) {
                 setValue(currentName);
               }}
             >
-              Cancel
+              {t('cancel')}
             </button>
           </div>
         </form>
@@ -79,11 +87,11 @@ export default function RenameForm({ currentName }: { currentName: string }) {
             setOpen(true);
           }}
         >
-          Change name
+          {t('changeName')}
         </button>
       )}
       <p className="mt-2 text-sm text-chalk" aria-live="polite">
-        {saved ? 'Name saved' : ''}
+        {saved ? t('nameSaved') : ''}
       </p>
     </div>
   );

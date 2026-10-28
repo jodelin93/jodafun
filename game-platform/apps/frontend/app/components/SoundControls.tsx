@@ -3,8 +3,11 @@
 import { useState, useEffect } from 'react';
 import { Volume, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { getSoundManager } from '../lib/sounds/soundManager';
+import { useT } from '../i18n/I18nProvider';
+import { gameMessages } from '../i18n/messages/game';
 
 export default function SoundControls() {
+  const t = useT(gameMessages);
   const [volume, setVolume] = useState(0.7);
   const [muted, setMuted] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -42,8 +45,8 @@ export default function SoundControls() {
         type="button"
         onClick={handleMuteToggle}
         className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-chalk transition hover:bg-white/10 hover:text-white"
-        title={muted ? 'Unmute' : 'Mute'}
-        aria-label={muted ? 'Unmute' : 'Mute'}
+        title={muted ? t('unmute') : t('mute')}
+        aria-label={muted ? t('unmute') : t('mute')}
       >
         {muted ? (
           <VolumeX className="h-5 w-5" aria-hidden="true" />
@@ -67,7 +70,7 @@ export default function SoundControls() {
           onChange={handleVolumeChange}
           disabled={muted}
           className="h-2 w-20 cursor-pointer accent-gold disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Volume"
+          aria-label={t('volume')}
         />
         <span className="min-w-[4ch] text-right text-sm tabular-nums text-chalk">
           {Math.round(volume * 100)}%

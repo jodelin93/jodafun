@@ -9,8 +9,12 @@ import SiteHeader from '../../components/ui/SiteHeader';
 import SiteFooter from '../../components/ui/SiteFooter';
 import StatsSection from '../../components/profile/StatsSection';
 import ProfileSkeleton from '../../components/profile/ProfileSkeleton';
+import { useLocale, useT } from '../../i18n/I18nProvider';
+import { profileMessages } from '../../i18n/messages/profile';
 
 function PublicProfileContent() {
+  const t = useT(profileMessages);
+  const { intlLocale } = useLocale();
   const params = useParams<{ id: string }>();
   const id = params.id;
   const router = useRouter();
@@ -45,15 +49,15 @@ function PublicProfileContent() {
 
   const back = (
     <Link href="/leaderboard" className="btn-quiet btn-sm mt-8">
-      Back to leaderboard
+      {t('backToLeaderboard')}
     </Link>
   );
 
   if (notFound) {
     return (
       <div className="panel max-w-xl p-5 sm:p-6" role="alert">
-        <h1 className="title-md">Player not found</h1>
-        <p className="mt-2 text-chalk">We couldn&apos;t find this player. Check the link or head back to the leaderboard.</p>
+        <h1 className="title-md">{t('playerNotFound')}</h1>
+        <p className="mt-2 text-chalk">{t('playerNotFoundBody')}</p>
         {back}
       </div>
     );
@@ -61,9 +65,9 @@ function PublicProfileContent() {
   if (failed) {
     return (
       <div className="panel max-w-xl p-5 sm:p-6" role="alert">
-        <p className="text-chalk">Couldn&apos;t load this profile. Check your connection and try again.</p>
+        <p className="text-chalk">{t('profileLoadFailed')}</p>
         <button type="button" className="btn-quiet mt-4" onClick={() => setAttempt((n) => n + 1)}>
-          Try again
+          {t('tryAgain')}
         </button>
       </div>
     );
@@ -74,9 +78,9 @@ function PublicProfileContent() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="title-lg break-words">{profile.name}</h1>
-        {profile.isGuest && <span className="chip">Guest</span>}
+        {profile.isGuest && <span className="chip">{t('guest')}</span>}
       </div>
-      <p className="mt-2 text-chalk">Member since {formatDate(profile.memberSince)}</p>
+      <p className="mt-2 text-chalk">{t('memberSince', { date: formatDate(profile.memberSince, intlLocale) })}</p>
       <StatsSection stats={profile.stats} canPlay={false} />
       <div>{back}</div>
     </>

@@ -55,6 +55,9 @@ export class NotFoundError extends Error {
   }
 }
 
+// A validation message from the server (English text), shown translated when known
+export class ServerMessageError extends Error {}
+
 const base = () => process.env.NEXT_PUBLIC_API_URL;
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -86,24 +89,25 @@ export async function renameMe(name: string): Promise<string> {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const msg = data && typeof data.error === 'string' ? data.error : null;
-    throw new Error(msg ?? "Couldn't save your name. Check your connection and try again.");
+    if (data && typeof data.error === 'string') throw new ServerMessageError(data.error);
+    throw new Error(`Request failed: ${res.status}`);
   }
   return data.name as string;
 }
 
-export function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+export function formatDate(iso: string, locale: string) {
+  return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-export function relativeDate(iso: string) {
+export function relativeDate(iso: string, locale: string, justNow: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const min = Math.floor(diff / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min} min ago`;
+  if (min < 1) return justNow;
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'always' });
+  if (min < 60) return rtf.format(-min, 'minute');
   const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} ${hr === 1 ? 'hour' : 'hours'} ago`;
+  if (hr < 24) return rtf.format(-hr, 'hour');
   const day = Math.floor(hr / 24);
-  if (day < 7) return `${day} ${day === 1 ? 'day' : 'days'} ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  if (day < 7) return rtf.format(-day, 'day');
+  return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' });
 }

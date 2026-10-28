@@ -12,21 +12,24 @@ import StatsSection from '../components/profile/StatsSection';
 import ProfileSkeleton from '../components/profile/ProfileSkeleton';
 import RenameForm from '../components/profile/RenameForm';
 import MatchHistory from '../components/profile/MatchHistory';
+import { useLocale, useT } from '../i18n/I18nProvider';
+import { profileMessages } from '../i18n/messages/profile';
 
 function SignedOut() {
+  const t = useT(profileMessages);
   const { play, loading, error } = useGuestPlay();
   return (
     <div className="panel max-w-xl p-5 sm:p-6">
-      <h1 className="title-lg">Your profile</h1>
+      <h1 className="title-lg">{t('yourProfile')}</h1>
       <p className="mt-3 text-chalk">
-        Sign in to see your stats, solo bests and match history. Or start playing and a guest profile is made for you.
+        {t('signedOutIntro')}
       </p>
       <div className="mt-5 flex flex-wrap gap-3">
         <Link href="/login" className="btn-quiet">
-          Sign in
+          {t('signIn')}
         </Link>
         <button type="button" className="btn-gold" disabled={loading} onClick={() => play()}>
-          {loading ? 'Starting…' : 'Play now'}
+          {loading ? t('starting') : t('playNow')}
         </button>
       </div>
       {error && (
@@ -39,6 +42,8 @@ function SignedOut() {
 }
 
 function ProfileContent() {
+  const t = useT(profileMessages);
+  const { intlLocale } = useLocale();
   const { user, isPending } = useAuth();
   const [stats, setStats] = useState<UserStats | null>(null);
   const [failed, setFailed] = useState(false);
@@ -72,25 +77,25 @@ function ProfileContent() {
     <>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="title-lg break-words">{user.name}</h1>
-        {isGuest && <span className="chip">Guest</span>}
+        {isGuest && <span className="chip">{t('guest')}</span>}
       </div>
-      <p className="mt-2 text-chalk">Member since {formatDate(user.createdAt)}</p>
+      <p className="mt-2 text-chalk">{t('memberSince', { date: formatDate(user.createdAt, intlLocale) })}</p>
       <RenameForm currentName={user.name} />
 
       {isGuest && (
         <div className="panel mt-6 max-w-xl p-5">
-          <p className="text-chalk">You&apos;re playing as a guest. Create an account to keep your stats on any device.</p>
+          <p className="text-chalk">{t('guestNote')}</p>
           <Link href="/convert-account" className="btn-quiet mt-4">
-            Create account
+            {t('createAccount')}
           </Link>
         </div>
       )}
 
       {failed ? (
         <div className="panel mt-8 max-w-xl p-5 sm:p-6" role="alert">
-          <p className="text-chalk">Couldn&apos;t load your stats. Check your connection and try again.</p>
+          <p className="text-chalk">{t('statsLoadFailed')}</p>
           <button type="button" className="btn-quiet mt-4" onClick={() => setAttempt((n) => n + 1)}>
-            Try again
+            {t('tryAgain')}
           </button>
         </div>
       ) : stats === null ? (

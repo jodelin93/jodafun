@@ -1,11 +1,16 @@
+'use client';
+
 import Link from 'next/link';
+import { useT } from '../../i18n/I18nProvider';
+import { siteMessages } from '../../i18n/messages/site';
 
 // Wordmark with two overlapping cards: one face-down, one face-up.
 // `compact` shows only the cards on phones (for crowded bars like the in-game header).
 export default function Logo({ size = 'md', compact = false }: { size?: 'sm' | 'md'; compact?: boolean }) {
+  const t = useT(siteMessages);
   const card = size === 'sm' ? 'h-6 w-[18px]' : 'h-8 w-6';
   return (
-    <Link href="/" className="group inline-flex shrink-0 items-center gap-2.5" aria-label="Joda Fun home">
+    <Link href="/" className="group inline-flex shrink-0 items-center gap-2.5" aria-label={t('logoAria')}>
       <span className="relative inline-flex" aria-hidden="true">
         <span className={`${card} card-back -rotate-12 rounded-[4px]`} />
         <span

@@ -7,9 +7,12 @@ import Link from 'next/link';
 import SiteHeader from '../components/ui/SiteHeader';
 import PlayingCard from '../components/ui/PlayingCard';
 import { AlertCircle, Brain } from 'lucide-react';
+import { useT } from '../i18n/I18nProvider';
+import { authMessages, authErrorKey } from '../i18n/messages/auth';
 
 export default function ConvertAccountPage() {
   const router = useRouter();
+  const t = useT(authMessages);
   const { user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,12 +32,12 @@ export default function ConvertAccountPage() {
 
     // Validation
     if (password !== confirmPassword) {
-      setError("The passwords don't match. Retype both and try again.");
+      setError(t('passwordsMismatch'));
       return;
     }
 
     if (password.length < 8) {
-      setError('Use a password with at least 8 characters.');
+      setError(t('passwordTooShort'));
       return;
     }
 
@@ -55,14 +58,16 @@ export default function ConvertAccountPage() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Failed to convert account');
+        const data = await response.json().catch(() => null);
+        const raw = data && typeof data.message === 'string' ? data.message : null;
+        const key = authErrorKey(raw);
+        throw new Error(key ? t(key) : raw || t('convertFailed'));
       }
 
       // Success - redirect to home
       router.push('/');
     } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred');
+      setError(err.message || t('unexpectedError'));
       console.error('Convert account error:', err);
     } finally {
       setLoading(false);
@@ -75,8 +80,8 @@ export default function ConvertAccountPage() {
       <main className="page py-8 sm:py-12">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <div className="panel mx-auto w-full max-w-md p-6 sm:p-8 lg:mx-0">
-            <h1 className="title-lg">Save your guest progress</h1>
-            <p className="mt-2 text-chalk">Add an email and password to keep your game stats and progress, and sign in from any device.</p>
+            <h1 className="title-lg">{t('saveGuestProgress')}</h1>
+            <p className="mt-2 text-chalk">{t('convertIntro')}</p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {error && (
@@ -87,7 +92,7 @@ export default function ConvertAccountPage() {
               )}
 
               <div>
-                <label htmlFor="email" className="field-label">Email</label>
+                <label htmlFor="email" className="field-label">{t('email')}</label>
                 <input
                   id="email"
                   type="email"
@@ -100,7 +105,7 @@ export default function ConvertAccountPage() {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="field-label">Password</label>
+                <label htmlFor="password" className="field-label">{t('password')}</label>
                 <input
                   id="password"
                   type="password"
@@ -109,11 +114,11 @@ export default function ConvertAccountPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="field"
-                  placeholder="At least 8 characters"
+                  placeholder={t('passwordHint')}
                 />
               </div>
               <div>
-                <label htmlFor="confirmPassword" className="field-label">Confirm password</label>
+                <label htmlFor="confirmPassword" className="field-label">{t('confirmPassword')}</label>
                 <input
                   id="confirmPassword"
                   type="password"
@@ -122,18 +127,18 @@ export default function ConvertAccountPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="field"
-                  placeholder="Repeat your password"
+                  placeholder={t('confirmPlaceholder')}
                 />
               </div>
 
               <button type="submit" disabled={loading} className="btn-gold w-full">
-                {loading ? 'Creating account…' : 'Create account'}
+                {loading ? t('creatingAccount') : t('createAccount')}
               </button>
             </form>
 
             <p className="mt-6">
               <Link href="/" className="font-semibold text-chalk underline underline-offset-4 hover:text-white">
-                Back to home
+                {t('backToHome')}
               </Link>
             </p>
           </div>
@@ -148,7 +153,7 @@ export default function ConvertAccountPage() {
                 </div>
               </PlayingCard>
             </div>
-            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">Your guest hand stays yours. Add a password and keep playing.</p>
+            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">{t('convertAside')}</p>
           </aside>
         </div>
       </main>

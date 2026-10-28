@@ -7,9 +7,12 @@ import { authClient, continueAsGuest } from '../lib/auth-client';
 import SiteHeader from '../components/ui/SiteHeader';
 import PlayingCard from '../components/ui/PlayingCard';
 import { AlertCircle, Brain } from 'lucide-react';
+import { useT } from '../i18n/I18nProvider';
+import { authMessages, authErrorKey } from '../i18n/messages/auth';
 
 export default function SignupPage() {
   const router = useRouter();
+  const t = useT(authMessages);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,12 +27,12 @@ export default function SignupPage() {
 
     // Validation
     if (password !== confirmPassword) {
-      setError("The passwords don't match. Retype both and try again.");
+      setError(t('passwordsMismatch'));
       return;
     }
 
     if (password.length < 8) {
-      setError('Use a password with at least 8 characters.');
+      setError(t('passwordTooShort'));
       return;
     }
 
@@ -43,13 +46,14 @@ export default function SignupPage() {
       });
 
       if (result.error) {
-        setError(result.error.message || "Couldn't create the account. Check your details and try again.");
+        const key = authErrorKey(result.error.message);
+        setError(key ? t(key) : result.error.message || t('signUpFailed'));
       } else {
         // Redirect to home or dashboard
         router.push('/');
       }
     } catch (err) {
-      setError('Something went wrong. Try again in a moment.');
+      setError(t('somethingWrong'));
       console.error('Signup error:', err);
     } finally {
       setLoading(false);
@@ -64,7 +68,7 @@ export default function SignupPage() {
       await continueAsGuest();
       router.push('/');
     } catch (err) {
-      setError("Couldn't start a guest session. Check your connection and try again.");
+      setError(t('guestFailed'));
       console.error('Guest login error:', err);
     } finally {
       setGuestLoading(false);
@@ -77,8 +81,8 @@ export default function SignupPage() {
       <main className="page py-8 sm:py-12">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <div className="panel mx-auto w-full max-w-md p-6 sm:p-8 lg:mx-0">
-            <h1 className="title-lg">Create your account</h1>
-            <p className="mt-2 text-chalk">Keep your scores and play from any device.</p>
+            <h1 className="title-lg">{t('createYourAccount')}</h1>
+            <p className="mt-2 text-chalk">{t('signupIntro')}</p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {error && (
@@ -89,7 +93,7 @@ export default function SignupPage() {
               )}
 
               <div>
-                <label htmlFor="name" className="field-label">Name</label>
+                <label htmlFor="name" className="field-label">{t('name')}</label>
                 <input
                   id="name"
                   type="text"
@@ -98,11 +102,11 @@ export default function SignupPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="field"
-                  placeholder="Your name"
+                  placeholder={t('namePlaceholder')}
                 />
               </div>
               <div>
-                <label htmlFor="email" className="field-label">Email</label>
+                <label htmlFor="email" className="field-label">{t('email')}</label>
                 <input
                   id="email"
                   type="email"
@@ -115,7 +119,7 @@ export default function SignupPage() {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="field-label">Password</label>
+                <label htmlFor="password" className="field-label">{t('password')}</label>
                 <input
                   id="password"
                   type="password"
@@ -124,11 +128,11 @@ export default function SignupPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="field"
-                  placeholder="At least 8 characters"
+                  placeholder={t('passwordHint')}
                 />
               </div>
               <div>
-                <label htmlFor="confirmPassword" className="field-label">Confirm password</label>
+                <label htmlFor="confirmPassword" className="field-label">{t('confirmPassword')}</label>
                 <input
                   id="confirmPassword"
                   type="password"
@@ -137,19 +141,19 @@ export default function SignupPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="field"
-                  placeholder="Repeat your password"
+                  placeholder={t('confirmPlaceholder')}
                 />
               </div>
 
               <button type="submit" disabled={loading} className="btn-gold w-full">
-                {loading ? 'Creating account…' : 'Create account'}
+                {loading ? t('creatingAccount') : t('createAccount')}
               </button>
             </form>
 
             <p className="mt-6 text-chalk">
-              Already have an account?{' '}
+              {t('haveAccount')}{' '}
               <Link href="/login" className="font-semibold text-white underline underline-offset-4 hover:text-gold">
-                Sign in
+                {t('signIn')}
               </Link>
             </p>
           <div className="mt-6 border-t border-table-rim pt-6">
@@ -159,7 +163,7 @@ export default function SignupPage() {
               disabled={guestLoading || loading}
               className="btn-quiet w-full"
             >
-              {guestLoading ? 'Setting up your guest account…' : 'Play as a guest'}
+              {guestLoading ? t('settingUpGuest') : t('playAsGuest')}
             </button>
           </div>
           </div>
@@ -174,7 +178,7 @@ export default function SignupPage() {
                 </div>
               </PlayingCard>
             </div>
-            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">Take a seat. Your account keeps your place at the table.</p>
+            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">{t('signupAside')}</p>
           </aside>
         </div>
       </main>

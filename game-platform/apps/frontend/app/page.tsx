@@ -4,6 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Play, Users, Timer, Link2, Check } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
+import { useLocale, useT } from './i18n/I18nProvider';
+import { homeMessages } from './i18n/messages/home';
 import { useGuestPlay } from './lib/useGuestPlay';
 import { GAMES, gamePath, type Game } from './lib/games';
 import SiteHeader from './components/ui/SiteHeader';
@@ -51,20 +53,21 @@ export default function Home() {
 }
 
 function Hero({ onPlay, loading, error }: { onPlay: () => void; loading: boolean; error: string | null }) {
+  const t = useT(homeMessages);
   return (
     <section className="page grid items-center gap-10 pb-8 pt-10 sm:pt-16 lg:grid-cols-[1.05fr_1fr] lg:gap-6 lg:pb-16">
       <div className="max-w-xl">
-        <h1 className="title-xl">Quick games to play with friends, right in your browser.</h1>
+        <h1 className="title-xl">{t('heroTitle')}</h1>
         <p className="mt-5 text-lg leading-relaxed text-chalk">
-          No downloads and no sign-up. Start a game, send your friend the link, and play together.
+          {t('heroBody')}
         </p>
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <button onClick={onPlay} disabled={loading} className="btn-gold px-6 py-3.5 text-lg">
             <Play className="h-5 w-5 fill-current" aria-hidden="true" />
-            {loading ? 'Starting…' : `Play ${featured.title}`}
+            {loading ? t('starting') : t('playGame', { title: featured.title })}
           </button>
           <Link href="/signup" className="btn-quiet px-6 py-3.5 text-lg">
-            Create an account
+            {t('createAccount')}
           </Link>
         </div>
         {error && (
@@ -80,6 +83,7 @@ function Hero({ onPlay, loading, error }: { onPlay: () => void; loading: boolean
 }
 
 function FanHand({ onPlay }: { onPlay: () => void }) {
+  const t = useT(homeMessages);
   return (
     <div className="relative mx-auto h-[240px] w-full max-w-[460px] sm:h-[330px]">
       {HAND.map((game, i) => {
@@ -102,7 +106,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
               {isFeatured ? (
                 <button
                   onClick={onPlay}
-                  aria-label={`Play ${game.title}`}
+                  aria-label={t('playGame', { title: game.title })}
                   className="h-full w-full rounded-card text-left shadow-lift"
                 >
                   <PlayingCard className="h-full w-full">
@@ -115,7 +119,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
                 </PlayingCard>
               )}
             </div>
-            {!isFeatured && <span className="sr-only">{game.title}, coming soon</span>}
+            {!isFeatured && <span className="sr-only">{t('comingSoonSr', { title: game.title })}</span>}
           </div>
         );
       })}
@@ -124,6 +128,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
 }
 
 function CardFace({ game, cta }: { game: Game; cta?: boolean }) {
+  const t = useT(homeMessages);
   const Icon = game.Icon;
   // Corner icons mirror the index marks on a real playing card
   return (
@@ -133,13 +138,15 @@ function CardFace({ game, cta }: { game: Game; cta?: boolean }) {
         <Icon className="h-10 w-10 text-signal sm:h-14 sm:w-14" strokeWidth={1.75} aria-hidden="true" />
       </div>
       <p className="font-display text-sm font-extrabold leading-tight sm:text-lg">{game.title}</p>
-      <p className="mt-0.5 text-xs text-ink-soft">{cta ? 'Tap to play' : 'Coming soon'}</p>
+      <p className="mt-0.5 text-xs text-ink-soft">{cta ? t('tapToPlay') : t('comingSoon')}</p>
       <Icon className="absolute bottom-3 right-3 h-4 w-4 rotate-180 text-signal sm:bottom-4 sm:right-4 sm:h-5 sm:w-5" aria-hidden="true" />
     </div>
   );
 }
 
 function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }) {
+  const t = useT(homeMessages);
+  const { intlLocale } = useLocale();
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   if (!user) return null;
@@ -152,21 +159,21 @@ function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     } catch {
-      window.prompt('Copy this link and send it to a friend:', window.location.origin);
+      window.prompt(t('copyLinkPrompt'), window.location.origin);
     }
   };
 
   return (
     <section className="page pt-10 sm:pt-14">
-      <h1 className="title-lg">Welcome back, {user.name}</h1>
+      <h1 className="title-lg">{t('welcomeBack', { name: user.name })}</h1>
 
       {isGuest && (
         <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-gold/40 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <p className="text-chalk">
-            You&apos;re playing as a guest. Create an account to keep your scores and play from any device.
+            {t('guestNotice')}
           </p>
           <Link href="/convert-account" className="btn-quiet btn-sm shrink-0">
-            Create account
+            {t('createAccountShort')}
           </Link>
         </div>
       )}
@@ -180,33 +187,33 @@ function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }
         </div>
         <div>
           <h2 className="title-lg">{featured.title}</h2>
-          <p className="mt-2 max-w-prose text-chalk">{featured.description}</p>
+          <p className="mt-2 max-w-prose text-chalk">{t(featured.description)}</p>
           <ul className="mt-4 flex flex-wrap gap-2">
-            <li className="chip"><Users className="h-4 w-4" aria-hidden="true" />{featured.players}</li>
-            <li className="chip"><Timer className="h-4 w-4" aria-hidden="true" />{featured.duration}</li>
+            <li className="chip"><Users className="h-4 w-4" aria-hidden="true" />{t('playersRange', { range: featured.players })}</li>
+            <li className="chip"><Timer className="h-4 w-4" aria-hidden="true" />{t('durationRange', { range: featured.duration })}</li>
           </ul>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button onClick={onPlay} disabled={loading} className="btn-gold px-6">
               <Play className="h-5 w-5 fill-current" aria-hidden="true" />
-              {loading ? 'Starting…' : `Play ${featured.title}`}
+              {loading ? t('starting') : t('playGame', { title: featured.title })}
             </button>
             <button onClick={copyLink} className="btn-quiet">
               {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}
-              {copied ? 'Link copied' : 'Copy link to share'}
+              {copied ? t('linkCopied') : t('copyLink')}
             </button>
-            <span className="sr-only" aria-live="polite">{copied ? 'Link copied' : ''}</span>
+            <span className="sr-only" aria-live="polite">{copied ? t('linkCopied') : ''}</span>
           </div>
         </div>
       </div>
 
       <dl className="mt-6 grid gap-x-8 gap-y-3 rounded-2xl p-5 ring-1 ring-inset ring-white/10 sm:grid-cols-2">
-        <AccountRow label="Email" value={isGuest ? 'Guest account' : user.email} />
-        <AccountRow label="Account type" value={isGuest ? 'Guest' : 'Member'} />
+        <AccountRow label={t('accEmail')} value={isGuest ? t('accGuestAccount') : user.email} />
+        <AccountRow label={t('accType')} value={isGuest ? t('accGuest') : t('accMember')} />
         <AccountRow
-          label="Member since"
-          value={new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+          label={t('accSince')}
+          value={new Date(user.createdAt).toLocaleDateString(intlLocale, { month: 'short', day: 'numeric', year: 'numeric' })}
         />
-        <AccountRow label="Email verified" value={user.emailVerified ? 'Yes' : 'Not yet'} />
+        <AccountRow label={t('accVerified')} value={user.emailVerified ? t('yes') : t('notYet')} />
       </dl>
     </section>
   );
@@ -222,12 +229,13 @@ function AccountRow({ label, value }: { label: string; value: string }) {
 }
 
 function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
+  const t = useT(homeMessages);
   return (
     <section className="page mt-16" aria-labelledby="games-heading">
       <div className="flex items-end justify-between gap-4">
-        <h2 id="games-heading" className="title-lg">Games</h2>
+        <h2 id="games-heading" className="title-lg">{t('gamesHeading')}</h2>
         <Link href="/games" className="text-sm font-semibold text-gold hover:underline">
-          See all games
+          {t('seeAll')}
         </Link>
       </div>
       {/* Phones: a swipeable row where the next card peeks in; larger screens: a grid */}
@@ -238,14 +246,14 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
               <button
                 onClick={() => onPlay(game)}
                 className="group block aspect-[3/4] w-full rounded-card text-left"
-                aria-label={`Play ${game.title}`}
+                aria-label={t('playGame', { title: game.title })}
               >
                 <PlayingCard className="h-full w-full transition-transform duration-200 group-hover:-translate-y-1">
                   <div className="flex h-full flex-col p-4">
                     <game.Icon className="h-9 w-9 text-signal" strokeWidth={1.75} aria-hidden="true" />
                     <p className="mt-auto font-display text-lg font-extrabold leading-tight">{game.title}</p>
-                    <p className="mt-1 text-xs text-ink-soft">{game.players}</p>
-                    <span className="btn-gold btn-sm mt-3 w-full">Play</span>
+                    <p className="mt-1 text-xs text-ink-soft">{t('playersRange', { range: game.players })}</p>
+                    <span className="btn-gold btn-sm mt-3 w-full">{t('play')}</span>
                   </div>
                 </PlayingCard>
               </button>
@@ -258,7 +266,7 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
                     <div className="flex h-full flex-col justify-end p-3">
                       <div className="rounded-lg bg-felt-deep/90 px-3 py-2">
                         <p className="font-display font-bold leading-tight text-white">{game.title}</p>
-                        <p className="text-xs text-chalk">Coming soon</p>
+                        <p className="text-xs text-chalk">{t('comingSoon')}</p>
                       </div>
                     </div>
                   }
@@ -272,25 +280,25 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
   );
 }
 
-const STEPS = [
-  { title: 'Start a game', body: `Open ${featured.title} and choose to play with a friend.` },
-  { title: 'Send the link', body: 'Copy your room link and send it however you like.' },
-  { title: 'Take turns', body: 'Your friend opens the link and joins your table. First to win four rounds takes the game.' },
-];
-
 function PlayWithFriend({ onPlay, loading }: { onPlay: () => void; loading: boolean }) {
+  const t = useT(homeMessages);
+  const steps = [
+    { title: t('step1Title'), body: t('step1Body', { title: featured.title }) },
+    { title: t('step2Title'), body: t('step2Body') },
+    { title: t('step3Title'), body: t('step3Body') },
+  ];
   return (
     <section className="page mt-16" aria-labelledby="friend-heading">
       <div className="panel grid gap-8 p-6 sm:p-10 lg:grid-cols-[1fr_2fr] lg:items-start">
         <div>
-          <h2 id="friend-heading" className="title-lg">Play with a friend</h2>
-          <p className="mt-3 text-chalk">Nobody needs to install anything. A link is all it takes.</p>
+          <h2 id="friend-heading" className="title-lg">{t('friendTitle')}</h2>
+          <p className="mt-3 text-chalk">{t('friendBody')}</p>
           <button onClick={onPlay} disabled={loading} className="btn-gold mt-6">
-            {loading ? 'Starting…' : 'Start a game'}
+            {loading ? t('starting') : t('startGame')}
           </button>
         </div>
         <ol className="grid gap-5 sm:grid-cols-3">
-          {STEPS.map((step, i) => (
+          {steps.map((step, i) => (
             <li key={step.title} className="flex gap-4 sm:block">
               <span
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold font-display text-lg font-extrabold text-ink"

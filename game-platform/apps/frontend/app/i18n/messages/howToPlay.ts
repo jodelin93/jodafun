@@ -1,0 +1,218 @@
+import { defineMessages } from '../I18nProvider';
+
+// Joda Memory "How to play" guide, shown under the menu and lobby screens.
+// Button names in quotes match the labels in game.ts for the same language.
+export const howToPlayMessages = defineMessages({
+  en: {
+    title: 'How to play',
+    intro: 'Tap a section to open it.',
+
+    goalTitle: 'The goal',
+    goal1: 'Find all the matching pairs of pictures. Every picture is on exactly two cards, and all the cards start face down.',
+
+    turnTitle: 'Taking a turn',
+    turn1: 'Flip two cards, one after the other.',
+    turn2: 'Same picture: you keep the pair, score a point and play again.',
+    turn3: 'Different pictures: both cards flip back face down. With a friend, the turn passes to the other player.',
+    turn4: 'Remember where each card is. Every card you see now helps you later.',
+
+    soloTitle: 'Playing solo',
+    solo1: 'Clear the board in the shortest time and with the fewest moves. One move is two flipped cards.',
+    solo2: 'Easy has 8 cards (4 pairs), Medium has 16 cards (8 pairs) and Hard has 24 cards (12 pairs).',
+    solo3: 'Your best time on each level is saved to your profile. That needs a session: sign in, or play as a guest.',
+    solo4: '"Pause" stops the timer. "Restart" deals a new board and starts the timer again.',
+
+    friendTitle: 'Playing with a friend',
+    friend1: 'Choose "Play with a friend", enter your name and create a room.',
+    friend2: 'Share the room link, or the 6-character room code. Codes never use 0, O, 1 or I, so they are easy to read out.',
+    friend3: 'Your friend opens the link (or types the code under "Have a code from a friend?"), enters a name and joins.',
+    friend4: 'You both press "Mark me ready".',
+    friend5: 'The host, the player who created the room, starts the game.',
+    friendOnline: 'You can also choose "Find players online" and send a request to someone who has Joda Memory open. They have 30 seconds to accept or decline. If they accept, you both go straight to a room.',
+
+    roundsTitle: 'Rounds and winning',
+    rounds1: 'A round ends when every pair has been found.',
+    rounds2: 'Whoever found more pairs wins the round.',
+    rounds3: 'Same number of pairs: the round is a tie and nobody wins it.',
+    rounds4: 'The first player to win 4 rounds wins the game.',
+    rounds5: 'After each round, the host deals the next one.',
+
+    optionsTitle: 'Room options',
+    options1: '"Show cards on their turn" is a host setting in the room. When it is off, you can\'t see the cards the other player flips.',
+    options2: '"Pause" stops the timer for both players. Only the player who paused can resume, and nobody can flip a card while the game is paused.',
+
+    leavingTitle: 'Leaving and coming back',
+    leaving1: 'Going back, refreshing the page, pressing "Menu" or opening another page keeps your seat: for 5 minutes in the room, or 60 seconds during a game.',
+    leaving2: 'Press "Return to room" at the top of the page to sit back down.',
+    leaving3: '"Leave room" and "Quit game" leave for real. If you leave a game once cards have been flipped, the other player wins by forfeit. The same happens if you don\'t come back in time.',
+
+    leaderboardTitle: 'Leaderboard',
+    leaderboard1: 'Only games played with friends count on the leaderboard, and only once a game reaches round 4.',
+    leaderboard2: 'Solo times go to your profile instead.',
+
+    tipsTitle: 'Tips',
+    tip1: 'Work through the board in order: start from a corner, or go row by row, instead of flipping at random.',
+    tip2: 'Say each picture in your head with its place, like "beach, top left". Words stick better than pictures alone.',
+    tip3: 'When the other player\'s cards are shown, watch their flips. Every card they turn over tells you where a picture is.',
+    tip4: 'When you turn over a picture you have seen before, go straight for its twin.',
+  },
+  fr: {
+    title: 'Comment jouer',
+    intro: 'Touchez une section pour l’ouvrir.',
+
+    goalTitle: 'Le but',
+    goal1: 'Trouvez toutes les paires d’images identiques. Chaque image figure sur exactement deux cartes, et toutes les cartes commencent face cachée.',
+
+    turnTitle: 'Jouer un tour',
+    turn1: 'Retournez deux cartes, l’une après l’autre.',
+    turn2: 'Même image : vous gardez la paire, marquez un point et rejouez.',
+    turn3: 'Images différentes : les deux cartes se retournent face cachée. À deux, c’est au tour de l’autre joueur.',
+    turn4: 'Retenez l’emplacement de chaque carte. Chaque carte vue maintenant vous servira plus tard.',
+
+    soloTitle: 'Jouer en solo',
+    solo1: 'Videz le plateau le plus vite possible et en un minimum de coups. Un coup, c’est deux cartes retournées.',
+    solo2: 'Facile compte 8 cartes (4 paires), Moyen 16 cartes (8 paires) et Difficile 24 cartes (12 paires).',
+    solo3: 'Votre record à chaque niveau est enregistré sur votre profil. Il faut une session : connectez-vous ou jouez en invité.',
+    solo4: '« Pause » arrête le chrono. « Recommencer » distribue un nouveau plateau et relance le chrono.',
+
+    friendTitle: 'Jouer avec un ami',
+    friend1: 'Choisissez « Jouer avec un ami », saisissez votre nom et créez une salle.',
+    friend2: 'Partagez le lien de la salle, ou son code à 6 caractères. Les codes n’utilisent jamais 0, O, 1 ni I : ils se lisent facilement.',
+    friend3: 'Votre ami ouvre le lien (ou tape le code sous « Vous avez un code d’un ami ? »), saisit un nom et rejoint la salle.',
+    friend4: 'Vous appuyez tous les deux sur « Me déclarer prêt ».',
+    friend5: 'L’hôte, c’est-à-dire le joueur qui a créé la salle, lance la partie.',
+    friendOnline: 'Vous pouvez aussi choisir « Trouver des joueurs en ligne » et envoyer une demande à quelqu’un qui a Joda Memory ouvert. Cette personne a 30 secondes pour accepter ou refuser. Si elle accepte, vous arrivez tous les deux directement dans une salle.',
+
+    roundsTitle: 'Manches et victoire',
+    rounds1: 'Une manche se termine quand toutes les paires ont été trouvées.',
+    rounds2: 'Le joueur qui a trouvé le plus de paires gagne la manche.',
+    rounds3: 'Même nombre de paires : la manche est nulle et personne ne la gagne.',
+    rounds4: 'Le premier joueur à gagner 4 manches remporte la partie.',
+    rounds5: 'Après chaque manche, l’hôte distribue la suivante.',
+
+    optionsTitle: 'Options de la salle',
+    options1: '« Montrer les cartes pendant son tour » est un réglage de l’hôte dans la salle. S’il est désactivé, vous ne voyez pas les cartes que l’autre joueur retourne.',
+    options2: '« Pause » arrête le chrono pour les deux joueurs. Seul le joueur qui a mis en pause peut reprendre, et personne ne peut retourner de carte pendant la pause.',
+
+    leavingTitle: 'Partir et revenir',
+    leaving1: 'Revenir en arrière, actualiser la page, appuyer sur « Menu » ou ouvrir une autre page vous garde votre place : 5 minutes dans la salle, ou 60 secondes pendant une partie.',
+    leaving2: 'Appuyez sur « Retourner dans la salle » en haut de la page pour reprendre votre place.',
+    leaving3: '« Quitter la salle » et « Abandonner la partie » vous font vraiment partir. Si vous quittez une partie après que des cartes ont été retournées, l’autre joueur gagne par forfait. C’est pareil si vous ne revenez pas à temps.',
+
+    leaderboardTitle: 'Classement',
+    leaderboard1: 'Seules les parties jouées entre amis comptent au classement, et seulement une fois la manche 4 atteinte.',
+    leaderboard2: 'Vos temps en solo vont sur votre profil.',
+
+    tipsTitle: 'Astuces',
+    tip1: 'Parcourez le plateau dans l’ordre : partez d’un coin ou avancez ligne par ligne, au lieu de retourner des cartes au hasard.',
+    tip2: 'Nommez chaque image dans votre tête avec sa place, par exemple « plage, en haut à gauche ». Les mots se retiennent mieux que les images seules.',
+    tip3: 'Quand les cartes de l’autre joueur sont visibles, regardez ce qu’il retourne. Chaque carte révélée vous indique où se trouve une image.',
+    tip4: 'Quand vous retournez une image déjà vue, allez droit sur sa jumelle.',
+  },
+  ht: {
+    title: 'Kijan pou jwe',
+    intro: 'Peze sou yon seksyon pou louvri l.',
+
+    goalTitle: 'Objektif la',
+    goal1: 'Jwenn tout pè imaj ki sanble yo. Chak imaj parèt sou de kat egzakteman, epi tout kat yo kòmanse vire anba.',
+
+    turnTitle: 'Jwe yon tou',
+    turn1: 'Vire de kat, youn apre lòt.',
+    turn2: 'Menm imaj: ou kenbe pè a, ou fè yon pwen epi ou jwe ankò.',
+    turn3: 'Imaj diferan: de kat yo retounen vire anba. Lè w ap jwe ak yon zanmi, se tou pa lòt jwè a.',
+    turn4: 'Sonje kote chak kat ye. Chak kat ou wè kounye a ap ede w pita.',
+
+    soloTitle: 'Jwe pou kont ou',
+    solo1: 'Vide tab la nan pi piti tan ak pi piti kou posib. Yon kou se de kat ou vire.',
+    solo2: 'Fasil gen 8 kat (4 pè), Mwayen gen 16 kat (8 pè) epi Difisil gen 24 kat (12 pè).',
+    solo3: 'Pi bon tan ou nan chak nivo anrejistre sou pwofil ou. Pou sa, ou bezwen yon sesyon: konekte, oswa jwe kòm envite.',
+    solo4: '"Pòz" kanpe kwonomèt la. "Rekòmanse" bay yon nouvo tab epi rekòmanse kwonomèt la.',
+
+    friendTitle: 'Jwe ak yon zanmi',
+    friend1: 'Chwazi "Jwe ak yon zanmi", mete non ou epi kreye yon chanm.',
+    friend2: 'Pataje lyen chanm lan, oswa kòd 6 karaktè a. Kòd yo pa janm gen 0, O, 1 oswa I, konsa yo fasil pou li.',
+    friend3: 'Zanmi ou louvri lyen an (oswa tape kòd la anba "Ou gen yon kòd yon zanmi ba ou?"), mete yon non epi antre.',
+    friend4: 'Nou tou de peze "Di mwen pare".',
+    friend5: 'Mèt chanm nan, sa vle di jwè ki kreye chanm lan, kòmanse jwèt la.',
+    friendOnline: 'Ou ka chwazi "Jwenn jwè ki an liy" tou pou voye yon demann bay yon moun ki gen Joda Memory louvri. Moun nan gen 30 segonn pou l aksepte oswa refize. Si l aksepte, nou tou de ale dirèk nan yon chanm.',
+
+    roundsTitle: 'Wonn ak kijan pou genyen',
+    rounds1: 'Yon wonn fini lè yo jwenn tout pè yo.',
+    rounds2: 'Moun ki jwenn plis pè genyen wonn lan.',
+    rounds3: 'Menm kantite pè: wonn lan egal epi pèsonn pa genyen l.',
+    rounds4: 'Premye jwè ki genyen 4 wonn genyen jwèt la.',
+    rounds5: 'Apre chak wonn, mèt chanm nan bay kat pwochen wonn lan.',
+
+    optionsTitle: 'Opsyon chanm lan',
+    options1: '"Montre kat yo lè se tou pa l" se yon reglaj mèt chanm nan chwazi nan chanm lan. Lè l etenn, ou pa ka wè kat lòt jwè a vire.',
+    options2: '"Pòz" kanpe kwonomèt la pou de jwè yo. Se sèlman jwè ki mete l an pòz la ki ka fè l kontinye, epi pèsonn pa ka vire kat pandan jwèt la an pòz.',
+
+    leavingTitle: 'Kite epi tounen',
+    leaving1: 'Si w tounen dèyè, rechaje paj la, peze "Meni" oswa ale sou yon lòt paj, plas ou rete kenbe: 5 minit nan chanm lan, oswa 60 segonn pandan yon jwèt.',
+    leaving2: 'Peze "Tounen nan chanm lan" anlè paj la pou reprann plas ou.',
+    leaving3: '"Kite chanm lan" ak "Kite jwèt la" fè w kite pou tout bon. Si w kite yon jwèt apre yo fin vire kat, lòt jwè a genyen paske ou abandone. Se menm bagay la si w pa tounen atan.',
+
+    leaderboardTitle: 'Klasman',
+    leaderboard1: 'Se sèlman jwèt ou jwe ak zanmi ki konte nan klasman an, epi sèlman lè jwèt la rive nan wonn 4.',
+    leaderboard2: 'Tan solo ou yo ale sou pwofil ou.',
+
+    tipsTitle: 'Konsèy',
+    tip1: 'Travay tab la nan lòd: kòmanse nan yon kwen, oswa ale ranje pa ranje, olye w vire kat o aza.',
+    tip2: 'Di chak imaj nan tèt ou ak kote li ye, tankou "plaj, anlè agoch". Mo yo rete nan tèt pi byen pase imaj sèlman.',
+    tip3: 'Lè kat lòt jwè a parèt, gade sa l ap vire. Chak kat li vire montre w kote yon imaj ye.',
+    tip4: 'Lè w vire yon imaj ou te deja wè, ale dirèk sou marasa li.',
+  },
+  es: {
+    title: 'Cómo jugar',
+    intro: 'Toca una sección para abrirla.',
+
+    goalTitle: 'El objetivo',
+    goal1: 'Encuentra todas las parejas de imágenes iguales. Cada imagen está en exactamente dos cartas, y todas las cartas empiezan boca abajo.',
+
+    turnTitle: 'Cómo se juega un turno',
+    turn1: 'Voltea dos cartas, una tras otra.',
+    turn2: 'Misma imagen: te quedas con la pareja, sumas un punto y vuelves a jugar.',
+    turn3: 'Imágenes distintas: las dos cartas vuelven a quedar boca abajo. Si juegas con un amigo, el turno pasa al otro jugador.',
+    turn4: 'Recuerda dónde está cada carta. Cada carta que ves ahora te ayuda después.',
+
+    soloTitle: 'Jugar solo',
+    solo1: 'Despeja el tablero en el menor tiempo y con la menor cantidad de jugadas. Una jugada son dos cartas volteadas.',
+    solo2: 'Fácil tiene 8 cartas (4 parejas), Media 16 cartas (8 parejas) y Difícil 24 cartas (12 parejas).',
+    solo3: 'Tu mejor tiempo en cada nivel se guarda en tu perfil. Para eso necesitas una sesión: inicia sesión o juega como invitado.',
+    solo4: '"Pausa" detiene el cronómetro. "Reiniciar" reparte un tablero nuevo y vuelve a empezar el cronómetro.',
+
+    friendTitle: 'Jugar con un amigo',
+    friend1: 'Elige "Jugar con un amigo", escribe tu nombre y crea una sala.',
+    friend2: 'Comparte el enlace de la sala o el código de 6 caracteres. Los códigos nunca usan 0, O, 1 ni I, así que se leen fácil.',
+    friend3: 'Tu amigo abre el enlace (o escribe el código en "¿Tienes un código de un amigo?"), pone un nombre y se une.',
+    friend4: 'Los dos presionan "Marcarme como listo".',
+    friend5: 'El anfitrión, es decir, quien creó la sala, inicia la partida.',
+    friendOnline: 'También puedes elegir "Buscar jugadores en línea" y enviar una solicitud a alguien que tenga Joda Memory abierto. Tiene 30 segundos para aceptar o rechazar. Si acepta, los dos entran directamente a una sala.',
+
+    roundsTitle: 'Rondas y cómo ganar',
+    rounds1: 'Una ronda termina cuando se han encontrado todas las parejas.',
+    rounds2: 'Quien encontró más parejas gana la ronda.',
+    rounds3: 'Mismo número de parejas: la ronda es un empate y nadie la gana.',
+    rounds4: 'El primer jugador en ganar 4 rondas gana la partida.',
+    rounds5: 'Después de cada ronda, el anfitrión reparte la siguiente.',
+
+    optionsTitle: 'Opciones de la sala',
+    options1: '"Mostrar las cartas en su turno" es un ajuste del anfitrión en la sala. Si está desactivado, no puedes ver las cartas que voltea el otro jugador.',
+    options2: '"Pausa" detiene el cronómetro para los dos jugadores. Solo quien pausó puede reanudar, y nadie puede voltear cartas mientras la partida está en pausa.',
+
+    leavingTitle: 'Salir y volver',
+    leaving1: 'Si vas atrás, recargas la página, presionas "Menú" o abres otra página, tu lugar se guarda: 5 minutos en la sala o 60 segundos durante una partida.',
+    leaving2: 'Presiona "Volver a la sala" arriba en la página para recuperar tu lugar.',
+    leaving3: '"Salir de la sala" y "Abandonar partida" te sacan de verdad. Si dejas una partida después de que se hayan volteado cartas, el otro jugador gana por abandono. Lo mismo pasa si no vuelves a tiempo.',
+
+    leaderboardTitle: 'Clasificación',
+    leaderboard1: 'Solo cuentan para la clasificación las partidas jugadas con amigos, y solo cuando llegan a la ronda 4.',
+    leaderboard2: 'Tus tiempos en solitario van a tu perfil.',
+
+    tipsTitle: 'Consejos',
+    tip1: 'Recorre el tablero en orden: empieza por una esquina o ve fila por fila, en lugar de voltear al azar.',
+    tip2: 'Nombra cada imagen en tu cabeza junto con su lugar, como "playa, arriba a la izquierda". Las palabras se recuerdan mejor que las imágenes solas.',
+    tip3: 'Cuando las cartas del otro jugador se muestran, mira lo que voltea. Cada carta que descubre te dice dónde está una imagen.',
+    tip4: 'Cuando voltees una imagen que ya viste, ve directo por su pareja.',
+  },
+});

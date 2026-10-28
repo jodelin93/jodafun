@@ -10,6 +10,10 @@ import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
+import LanguageSwitcher from '../i18n/LanguageSwitcher';
+import { useT } from '../i18n/I18nProvider';
+import { gameMessages } from '../i18n/messages/game';
+import { howToPlayMessages } from '../i18n/messages/howToPlay';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -18,7 +22,7 @@ import {
   ArrowLeft, Volume2, Brain, X, Eye, EyeOff, Copy, Check, Link2,
   Pause, Play, Home, LogOut, MessageSquare, Send, Gem, Flame,
   Cherry, Cpu, Puzzle, Sword, Wand2, Smile, Ghost, Coffee,
-  Cake, PartyPopper, Gift, Sparkle, User, Globe, Swords
+  Cake, PartyPopper, Gift, Sparkle, User, Globe, Swords, ChevronDown
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
@@ -141,6 +145,8 @@ const GRID_COLS = {
 export default function JodaMemory() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const t = useT(gameMessages);
+  const th = useT(howToPlayMessages);
   const [gameMode, setGameMode] = useState<GameMode>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [cards, setCards] = useState<Card[]>([]);
@@ -195,8 +201,10 @@ export default function JodaMemory() {
   const [startError, setStartError] = useState<string | null>(null);
   const [inviteNow, setInviteNow] = useState(() => Date.now());
   const [codeInput, setCodeInput] = useState('');
-  const [codeError, setCodeError] = useState<string | null>(null);
+  // The typed code and the server's error text; translated when shown
+  const [codeError, setCodeError] = useState<{ code: string; error?: string } | null>(null);
   // Name of the other player while their connection is down and the server is holding their seat
+  // ('' when the server sent no name; null when nobody is reconnecting)
   const [waitingForName, setWaitingForName] = useState<string | null>(null);
   // Read by the socket 'connect' listener, which outlives renders, to decide whether to rejoin a room
   const rejoinRef = useRef<{ roomId: string | null; inRoom: boolean }>({ roomId: null, inRoom: false });
@@ -491,7 +499,7 @@ export default function JodaMemory() {
         return;
       }
       setWaitingForName(null);
-      setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
+      setPlayerLeftNotice({ name: data.playerName || '', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
       if (data.gameInProgress) {
         // The server abandons the game and puts the room back in the lobby; mirror that here
         setGameStarted(false);
@@ -528,7 +536,7 @@ export default function JodaMemory() {
     // Listen for pause state changes
     socket.on('gamePaused', (data: { paused: boolean; pausedBy: string; pausedById?: string; pausedByName?: string }) => {
       setGamePaused(data.paused);
-      setPauseOwner(data.paused && data.pausedById ? { id: data.pausedById, name: data.pausedByName || 'Your friend' } : null);
+      setPauseOwner(data.paused && data.pausedById ? { id: data.pausedById, name: data.pausedByName || '' } : null);
     });
 
     // Listen for chat messages
@@ -577,7 +585,7 @@ export default function JodaMemory() {
     socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; expiresAt: number }) => {
       setInviteError(null);
       setInviteNow(Date.now());
-      setIncomingInvite({ inviteId: data.inviteId, fromName: data.from?.name || 'A player', expiresAt: data.expiresAt });
+      setIncomingInvite({ inviteId: data.inviteId, fromName: data.from?.name || '', expiresAt: data.expiresAt });
     });
     const dropInvite = (data: { inviteId: string }) =>
       setIncomingInvite(current => (current && current.inviteId === data.inviteId ? null : current));
@@ -586,7 +594,7 @@ export default function JodaMemory() {
 
     socket.on('playerDisconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
       if (data.playerId === socket.id) return;
-      setWaitingForName(data.playerName || 'Your friend');
+      setWaitingForName(data.playerName || '');
     });
 
     socket.on('playerReconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
@@ -1033,7 +1041,7 @@ export default function JodaMemory() {
     setCurrentRound(game.currentRound);
     roundsDealtRef.current = game.currentRound;
     setGamePaused(Boolean(room.pausedById));
-    setPauseOwner(room.pausedById ? { id: room.pausedById, name: room.pausedByName || 'Your friend' } : null);
+    setPauseOwner(room.pausedById ? { id: room.pausedById, name: room.pausedByName || '' } : null);
     setGameWon(false);
     setIsInLobby(false);
     setGameStarted(true);
@@ -1078,7 +1086,7 @@ export default function JodaMemory() {
         enterInviteRoom(res.room);
       } else {
         setIncomingInvite(null);
-        setInviteError(res?.error === 'Request expired' ? 'That request expired before you answered.' : 'That player is no longer available.');
+        setInviteError(res?.error === 'Request expired' ? 'expired' : 'unavailable');
       }
     });
   };
@@ -1163,11 +1171,7 @@ export default function JodaMemory() {
             getSoundManager().play('match');
           }
         } else if (code) {
-          setCodeError(
-            /not found/i.test(response.error ?? '')
-              ? `There's no open room with the code ${code}. Check the code, or ask your friend for the link.`
-              : response.error || "Couldn't join that room."
-          );
+          setCodeError({ code, error: response.error });
         } else {
           setConnectionError(response.error || 'Failed to join game');
         }
@@ -1198,7 +1202,7 @@ export default function JodaMemory() {
     setStartError(null);
     socketRef.current.emit('startGame', { roomId, difficulty }, (res: { success: boolean; error?: string }) => {
       if (res && !res.success) {
-        setStartError(res.error === 'Waiting for your friend' ? 'Waiting for your friend to be connected and in the room…' : res.error ?? "Couldn't start the game.");
+        setStartError(res.error ?? '');
       }
     });
   };
@@ -1241,8 +1245,32 @@ export default function JodaMemory() {
   // Presentational only: the turn chip copy shown on the scoreboard and announced to screen readers
   const turnLabel = (index: number) =>
     index === (gameMode === 'multiplayer' ? myPlayerIndex : 0)
-      ? 'Your turn'
-      : gameMode === 'single' ? "AI's turn" : 'Their turn';
+      ? t('yourTurn')
+      : gameMode === 'single' ? t('aiTurn') : t('theirTurn');
+
+  // Server and connection errors arrive in English; show the known ones in the visitor's language
+  const knownError = (error: string) =>
+    ({
+      'Failed to connect to game server': t('errConnect'),
+      'Failed to create game': t('errCreate'),
+      'Failed to join game': t('errJoin'),
+      'Game has already started': t('errStarted'),
+      'Too many requests': t('errTooMany'),
+    })[error] ?? error;
+  const startErrorText = (error: string) =>
+    ({
+      '': t('startFailed'),
+      'Waiting for your friend': t('startWaitingFriend'),
+      'Round in progress': t('startRoundInProgress'),
+      'Only host can start the game': t('startOnlyHost'),
+      'Room not found': t('startRoomGone'),
+    })[error] ?? knownError(error);
+  const codeErrorText = ({ code, error }: { code: string; error?: string }) =>
+    /not found/i.test(error ?? '')
+      ? t('codeNotFound', { code })
+      : /full/i.test(error ?? '')
+        ? t('roomFullBody')
+        : error ? knownError(error) : t('codeJoinFailed');
 
   return (
     <div className="min-h-screen">
@@ -1257,27 +1285,28 @@ export default function JodaMemory() {
               className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-chalk transition hover:bg-white/5 hover:text-white"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Games
+              {t('games')}
             </Link>
-            <h1 className="title-md truncate">Joda Memory</h1>
+            {/* flex-1 + min-w-0 lets the title shorten on phones instead of pushing the controls to a new row */}
+            <h1 className="title-md min-w-0 flex-1 truncate md:flex-none">Joda Memory</h1>
 
             <dl className="order-last flex w-full items-center gap-5 pb-1 text-sm md:order-none md:ml-auto md:w-auto md:pb-0">
               <div className="flex items-baseline gap-1.5">
-                <dt className="text-chalk">Time</dt>
+                <dt className="text-chalk">{t('time')}</dt>
                 <dd className="font-display text-lg font-bold tabular-nums">{formatTime(timer)}</dd>
               </div>
               <div className="flex items-baseline gap-1.5">
-                <dt className="text-chalk">Moves</dt>
+                <dt className="text-chalk">{t('moves')}</dt>
                 <dd className="font-display text-lg font-bold tabular-nums">{moves}</dd>
               </div>
               {gameMode === 'multiplayer' ? (
                 <div className="flex items-baseline gap-1.5">
-                  <dt className="text-chalk">Round</dt>
+                  <dt className="text-chalk">{t('round')}</dt>
                   <dd className="font-display text-lg font-bold tabular-nums">{currentRound}</dd>
                 </div>
               ) : (
                 <div className="flex items-baseline gap-1.5">
-                  <dt className="text-chalk">Best</dt>
+                  <dt className="text-chalk">{t('best')}</dt>
                   <dd className="font-display text-lg font-bold tabular-nums">
                     {bestTime ? formatTime(bestTime) : '--:--'}
                   </dd>
@@ -1285,7 +1314,8 @@ export default function JodaMemory() {
               )}
             </dl>
 
-            <div className="ml-auto md:ml-0">
+            <div className="ml-auto flex items-center gap-1 md:ml-0">
+              <LanguageSwitcher />
               <SoundControls />
             </div>
           </div>
@@ -1300,7 +1330,7 @@ export default function JodaMemory() {
           <div className="mb-8 flex items-start justify-between gap-4">
             <div>
               <h1 className="title-lg">Joda Memory</h1>
-              <p className="mt-2 text-chalk">Flip two cards at a time and find every matching pair.</p>
+              <p className="mt-2 text-chalk">{t('tagline')}</p>
             </div>
             <SoundControls />
           </div>
@@ -1308,7 +1338,7 @@ export default function JodaMemory() {
 
         {/* Scoreboard */}
         {gameStarted && (
-          <section aria-label="Scoreboard" className="mx-auto mb-4 max-w-3xl md:mb-6">
+          <section aria-label={t('scoreboard')} className="mx-auto mb-4 max-w-3xl md:mb-6">
             <p className="sr-only" aria-live="polite">
               {currentPlayer && !gameWon ? turnLabel(currentPlayerIndex) : ''}
             </p>
@@ -1323,27 +1353,27 @@ export default function JodaMemory() {
                     }`}
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-semibold">{player.name}</p>
+                      <p className="truncate font-semibold">{gameMode === 'single' ? t('you') : player.name}</p>
                       {isTurn ? (
                         <span
                           className={`mt-1 inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            turnLabel(index) === 'Your turn' ? 'bg-signal text-ink' : 'bg-white/10 text-chalk ring-1 ring-inset ring-white/15'
+                            turnLabel(index) === t('yourTurn') ? 'bg-signal text-ink' : 'bg-white/10 text-chalk ring-1 ring-inset ring-white/15'
                           }`}
                         >
                           {turnLabel(index)}
                         </span>
                       ) : player.isGuest ? (
-                        <span className="mt-1 block text-xs text-chalk">Guest</span>
+                        <span className="mt-1 block text-xs text-chalk">{t('guest')}</span>
                       ) : null}
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="font-display text-2xl font-extrabold leading-none tabular-nums sm:text-3xl">
                         {player.score}
-                        <span className="sr-only"> pairs</span>
+                        <span className="sr-only"> {t('pairsUnit')}</span>
                       </p>
-                      <p className="mt-1 text-xs text-chalk" aria-hidden="true">pairs</p>
+                      <p className="mt-1 text-xs text-chalk" aria-hidden="true">{t('pairsUnit')}</p>
                       {gameMode === 'multiplayer' && (
-                        <p className="text-xs text-chalk">Rounds won: {roundWins[index]}</p>
+                        <p className="text-xs text-chalk">{t('roundsWonCount', { count: roundWins[index] ?? 0 })}</p>
                       )}
                     </div>
                   </div>
@@ -1352,10 +1382,10 @@ export default function JodaMemory() {
             </div>
             {gameMode === 'multiplayer' && (
               <>
-                <p className="mt-2 text-sm text-chalk">First to win 4 rounds wins the game.</p>
-                {waitingForName && (
+                <p className="mt-2 text-sm text-chalk">{t('firstToFour')}</p>
+                {waitingForName !== null && (
                   <div className="mt-3">
-                    <ReconnectingNotice name={waitingForName} />
+                    <ReconnectingNotice name={waitingForName || t('yourFriend')} />
                   </div>
                 )}
               </>
@@ -1369,19 +1399,19 @@ export default function JodaMemory() {
             <div role="dialog" aria-modal="true" aria-labelledby="invite-title" className="panel w-full max-w-sm p-6 shadow-lift">
               <Swords className="h-8 w-8 text-gold" aria-hidden="true" />
               <h2 id="invite-title" className="title-lg mt-3">
-                {incomingInvite.fromName} wants to play
+                {t('wantsToPlay', { name: incomingInvite.fromName || t('aPlayer') })}
               </h2>
               <p className="mt-2 text-chalk">
-                Joda Memory, you against {incomingInvite.fromName}.{' '}
-                {gameStarted && gameMode === 'single' ? 'Accepting ends your solo game. ' : ''}
-                This request expires in {Math.max(0, Math.ceil((incomingInvite.expiresAt - inviteNow) / 1000))}s.
+                {t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
+                {gameStarted && gameMode === 'single' ? `${t('acceptingEndsSolo')} ` : ''}
+                {t('inviteExpiresIn', { seconds: Math.max(0, Math.ceil((incomingInvite.expiresAt - inviteNow) / 1000)) })}
               </p>
               <div className="mt-6 flex flex-col gap-2">
                 <button type="button" onClick={() => answerInvite(true)} className="btn-gold" autoFocus>
-                  Accept
+                  {t('accept')}
                 </button>
                 <button type="button" onClick={() => answerInvite(false)} className="btn-quiet">
-                  Decline
+                  {t('decline')}
                 </button>
               </div>
             </div>
@@ -1402,23 +1432,23 @@ export default function JodaMemory() {
                 <>
                   <Trophy className="h-8 w-8 text-gold" aria-hidden="true" />
                   <h2 id="memory-result-title" className="title-lg mt-3">
-                    {players[overallWinner]?.name} wins the game
+                    {t('winsGame', { name: players[overallWinner]?.name ?? '' })}
                   </h2>
                   <dl className="mt-4 space-y-1 text-chalk">
                     <div className="flex justify-between gap-4">
-                      <dt>Rounds won</dt>
+                      <dt>{t('roundsWon')}</dt>
                       <dd className="font-semibold tabular-nums text-white">
-                        {roundWins[overallWinner]} to {roundWins[overallWinner === 0 ? 1 : 0]}
+                        {t('scoreTo', { a: roundWins[overallWinner] ?? 0, b: roundWins[overallWinner === 0 ? 1 : 0] ?? 0 })}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt>Rounds played</dt>
+                      <dt>{t('roundsPlayed')}</dt>
                       <dd className="font-semibold tabular-nums text-white">{currentRound}</dd>
                     </div>
                   </dl>
                   <div className="mt-6 flex flex-col gap-2">
                     <button type="button" onClick={handleBackToMenu} className="btn-quiet" autoFocus>
-                      Back to menu
+                      {t('backToMenu')}
                     </button>
                   </div>
                 </>
@@ -1426,19 +1456,19 @@ export default function JodaMemory() {
                 // Round winner
                 <>
                   <h2 id="memory-result-title" className="title-lg">
-                    {players[roundWinner]?.name} won round {currentRound}
+                    {t('wonRound', { name: players[roundWinner]?.name ?? '', round: currentRound })}
                   </h2>
                   <dl className="mt-4 space-y-1 text-chalk">
                     <div className="flex justify-between gap-4">
-                      <dt>Pairs this round</dt>
+                      <dt>{t('pairsThisRound')}</dt>
                       <dd className="font-semibold tabular-nums text-white">
-                        {roundWinner !== null && players[roundWinner] ? `${players[roundWinner].score} to ${players[roundWinner === 0 ? 1 : 0]?.score ?? 0}` : ''}
+                        {roundWinner !== null && players[roundWinner] ? t('scoreTo', { a: players[roundWinner].score, b: players[roundWinner === 0 ? 1 : 0]?.score ?? 0 }) : ''}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt>Rounds won</dt>
+                      <dt>{t('roundsWon')}</dt>
                       <dd className="font-semibold tabular-nums text-white">
-                        {roundWins[0]} to {roundWins[1]}
+                        {t('scoreTo', { a: roundWins[0] ?? 0, b: roundWins[1] ?? 0 })}
                       </dd>
                     </div>
                   </dl>
@@ -1448,14 +1478,14 @@ export default function JodaMemory() {
                 // Tied round: no round win, play continues
                 <>
                   <h2 id="memory-result-title" className="title-lg">
-                    Round {currentRound} is a tie
+                    {t('roundTie', { round: currentRound })}
                   </h2>
-                  <p className="mt-2 text-chalk">You found the same number of pairs, so nobody wins this round.</p>
+                  <p className="mt-2 text-chalk">{t('roundTieBody')}</p>
                   <dl className="mt-4 space-y-1 text-chalk">
                     <div className="flex justify-between gap-4">
-                      <dt>Rounds won</dt>
+                      <dt>{t('roundsWon')}</dt>
                       <dd className="font-semibold tabular-nums text-white">
-                        {roundWins[0]} to {roundWins[1]}
+                        {t('scoreTo', { a: roundWins[0] ?? 0, b: roundWins[1] ?? 0 })}
                       </dd>
                     </div>
                   </dl>
@@ -1464,34 +1494,34 @@ export default function JodaMemory() {
               ) : (
                 // Single player victory
                 <>
-                  <h2 id="memory-result-title" className="title-lg">You found every pair</h2>
+                  <h2 id="memory-result-title" className="title-lg">{t('foundEveryPair')}</h2>
                   {timer === bestTime && (
                     <p className="chip mt-3 text-white">
                       <Trophy className="h-4 w-4 text-gold" aria-hidden="true" />
-                      New best time
+                      {t('newBestTime')}
                     </p>
                   )}
                   <dl className="mt-4 space-y-1 text-chalk">
                     <div className="flex justify-between gap-4">
-                      <dt>Pairs</dt>
+                      <dt>{t('pairs')}</dt>
                       <dd className="font-semibold tabular-nums text-white">{winner.score}</dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt>Time</dt>
+                      <dt>{t('time')}</dt>
                       <dd className="font-semibold tabular-nums text-white">{formatTime(timer)}</dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt>Moves</dt>
+                      <dt>{t('moves')}</dt>
                       <dd className="font-semibold tabular-nums text-white">{moves}</dd>
                     </div>
                   </dl>
                   <SoloSaveStatus save={soloSave} difficulty={difficulty} />
                   <div className="mt-6 flex flex-col gap-2">
                     <button type="button" onClick={handleNextRound} className="btn-gold" autoFocus>
-                      Play again
+                      {t('playAgain')}
                     </button>
                     <button type="button" onClick={handleBackToMenu} className="btn-quiet">
-                      Back to menu
+                      {t('backToMenu')}
                     </button>
                   </div>
                 </>
@@ -1513,7 +1543,7 @@ export default function JodaMemory() {
           />
         ) : !gameMode ? (
           <section aria-labelledby="memory-mode-title" className="max-w-2xl">
-            <h2 id="memory-mode-title" className="title-md mb-4">How do you want to play?</h2>
+            <h2 id="memory-mode-title" className="title-md mb-4">{t('modeTitle')}</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <button
                 type="button"
@@ -1523,8 +1553,8 @@ export default function JodaMemory() {
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
                   <User className="h-6 w-6" aria-hidden="true" />
                 </span>
-                <span className="title-md">Play solo</span>
-                <span className="text-sm text-ink-soft">Find every pair as fast as you can and beat your best time.</span>
+                <span className="title-md">{t('playSolo')}</span>
+                <span className="text-sm text-ink-soft">{t('playSoloDesc')}</span>
               </button>
 
               <button
@@ -1535,8 +1565,8 @@ export default function JodaMemory() {
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
                   <Users className="h-6 w-6" aria-hidden="true" />
                 </span>
-                <span className="title-md">Play with a friend</span>
-                <span className="text-sm text-ink-soft">Open a room, send the link and take turns finding pairs.</span>
+                <span className="title-md">{t('playFriend')}</span>
+                <span className="text-sm text-ink-soft">{t('playFriendDesc')}</span>
               </button>
 
               <button
@@ -1549,16 +1579,16 @@ export default function JodaMemory() {
                     <Globe className="h-6 w-6" aria-hidden="true" />
                   </span>
                   <span className="rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-ink-soft">
-                    {othersOnline} online
+                    {t('onlineCount', { count: othersOnline })}
                   </span>
                 </span>
-                <span className="title-md">Find players online</span>
-                <span className="text-sm text-ink-soft">See who else has Joda Memory open and send them a game request.</span>
+                <span className="title-md">{t('findOnline')}</span>
+                <span className="text-sm text-ink-soft">{t('findOnlineDesc')}</span>
               </button>
             </div>
             {inviteError && (
               <p role="alert" className="mt-4 text-sm text-white">
-                {inviteError}
+                {inviteError === 'expired' ? t('inviteExpired') : t('inviteUnavailable')}
               </p>
             )}
           </section>
@@ -1567,7 +1597,7 @@ export default function JodaMemory() {
             /* Multiplayer Name Input */
             <section aria-labelledby="memory-name-title" className="max-w-md">
               <h2 id="memory-name-title" className="title-md mb-4">
-                {roomId ? "Join your friend's game" : 'Create a room'}
+                {roomId ? t('joinFriendTitle') : t('createRoomTitle')}
               </h2>
 
               {connectionError && (
@@ -1575,17 +1605,17 @@ export default function JodaMemory() {
                   <div className="flex items-center gap-2">
                     <X className="h-5 w-5 text-signal" aria-hidden="true" />
                     <h3 className="font-display text-lg font-bold">
-                      {/full/i.test(connectionError) ? 'This room is full' : "Couldn't join the room"}
+                      {/full/i.test(connectionError) ? t('roomFullTitle') : t('couldntJoinTitle')}
                     </h3>
                   </div>
                   <p className="mt-1 text-chalk">
                     {/full/i.test(connectionError)
-                      ? 'Two players are already in this room. Ask your friend to create a new room and send you the new link.'
+                      ? t('roomFullBody')
                       : /not found/i.test(connectionError)
                       ? roomId
-                        ? 'This room has closed. Ask your friend to create a new room and send you the new link.'
-                        : 'Your room closed while you were away. Create a new room and send the new link.'
-                      : connectionError}
+                        ? t('roomClosedBody')
+                        : t('roomClosedAwayBody')
+                      : knownError(connectionError)}
                   </p>
                   <button
                     onClick={() => {
@@ -1595,21 +1625,21 @@ export default function JodaMemory() {
                     }}
                     className="btn-quiet btn-sm mt-4"
                   >
-                    Back to menu
+                    {t('backToMenu')}
                   </button>
                 </div>
               )}
 
               <div className="panel p-5 sm:p-6">
                 <label htmlFor="memory-player-name" className="field-label">
-                  Your name
+                  {t('yourName')}
                 </label>
                 <input
                   id="memory-player-name"
                   type="text"
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="The name your friend will see"
+                  placeholder={t('namePlaceholder')}
                   maxLength={20}
                   autoComplete="nickname"
                   className="field"
@@ -1631,7 +1661,7 @@ export default function JodaMemory() {
                       disabled={!playerName.trim()}
                       className="btn-gold sm:flex-1"
                     >
-                      Create room
+                      {t('createRoom')}
                     </button>
                   )}
                   {roomId && (
@@ -1640,14 +1670,14 @@ export default function JodaMemory() {
                       disabled={!playerName.trim()}
                       className="btn-gold sm:flex-1"
                     >
-                      Join game
+                      {t('joinGame')}
                     </button>
                   )}
                   <button
                     onClick={handleBackToMode}
                     className="btn-quiet"
                   >
-                    Back
+                    {t('back')}
                   </button>
                 </div>
 
@@ -1660,7 +1690,7 @@ export default function JodaMemory() {
                     }}
                   >
                     <label htmlFor="memory-room-code" className="field-label">
-                      Have a code from a friend?
+                      {t('haveCode')}
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -1675,7 +1705,7 @@ export default function JodaMemory() {
                           setCodeError(null);
                           setCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6));
                         }}
-                        placeholder="6-character code"
+                        placeholder={t('codePlaceholder')}
                         aria-describedby={codeError ? 'memory-room-code-error' : undefined}
                         className="field min-w-0 flex-1 font-display tracking-[0.2em]"
                       />
@@ -1684,16 +1714,16 @@ export default function JodaMemory() {
                         disabled={!playerName.trim() || codeInput.length !== 6}
                         className="btn-quiet shrink-0"
                       >
-                        Join
+                        {t('join')}
                       </button>
                     </div>
                     {codeError ? (
                       <p id="memory-room-code-error" role="alert" className="mt-2 text-sm text-white">
-                        {codeError}
+                        {codeErrorText(codeError)}
                       </p>
                     ) : (
                       !playerName.trim() && codeInput.length === 6 && (
-                        <p className="mt-2 text-sm text-chalk">Add your name above to join.</p>
+                        <p className="mt-2 text-sm text-chalk">{t('addNameToJoin')}</p>
                       )
                     )}
                   </form>
@@ -1703,31 +1733,31 @@ export default function JodaMemory() {
           ) : gameMode === 'multiplayer' && isInLobby ? (
             /* Multiplayer Lobby */
             <section aria-labelledby="memory-lobby-title" className="max-w-2xl space-y-4">
-              <h2 id="memory-lobby-title" className="title-md">Game room</h2>
+              <h2 id="memory-lobby-title" className="title-md">{t('gameRoom')}</h2>
 
-              {waitingForName && <ReconnectingNotice name={waitingForName} />}
+              {waitingForName !== null && <ReconnectingNotice name={waitingForName || t('yourFriend')} />}
 
               {playerLeftNotice && (
                 <div role="status" className="flex items-start justify-between gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-signal/60">
                   <div>
                     <p className="font-semibold">
-                      {playerLeftNotice.name} left {playerLeftNotice.duringGame ? 'the game' : 'the room'}
+                      {t(playerLeftNotice.duringGame ? 'leftGame' : 'leftRoom', { name: playerLeftNotice.name || t('yourFriend') })}
                     </p>
                     <p className="mt-1 text-sm text-chalk">
                       {playerLeftNotice.forfeit
                         ? playerLeftNotice.reachedRound >= 4
-                        ? 'You win by forfeit, and it counts on the leaderboard. Send the link again to play with someone new.'
-                        : "You win by forfeit. It's in your match history, but games only count on the leaderboard once they reach round 4."
+                        ? t('forfeitCounts')
+                        : t('forfeitNotCounted')
                         : playerLeftNotice.duringGame
-                        ? 'The game ended before anyone flipped a card, so nothing was saved. Send the link again to play with someone new.'
-                        : 'Send the link again to play with someone new.'}
+                        ? t('endedBeforeFlip')
+                        : t('sendLinkAgain')}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setPlayerLeftNotice(null)}
                     className="btn-quiet btn-sm min-h-11 shrink-0"
-                    aria-label="Dismiss"
+                    aria-label={t('dismiss')}
                   >
                     <X className="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -1736,7 +1766,7 @@ export default function JodaMemory() {
 
               {/* Room Code */}
               <div className="panel p-5">
-                <p className="text-sm text-chalk">Room code</p>
+                <p className="text-sm text-chalk">{t('roomCode')}</p>
                 <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
                   <span className="break-all font-display text-2xl font-extrabold sm:text-3xl">{roomId}</span>
                   <button
@@ -1745,17 +1775,17 @@ export default function JodaMemory() {
                     className="btn-quiet btn-sm min-h-11"
                   >
                     {copiedLink ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-                    {copiedLink ? 'Copied' : 'Copy link'}
+                    {copiedLink ? t('copied') : t('copyLink')}
                   </button>
                 </div>
                 <p className="mt-3 text-sm text-chalk" aria-live="polite">
-                  {copiedLink ? 'Copied. Send the link to your friend so they can join.' : 'Send the room link to a friend so they can join.'}
+                  {copiedLink ? t('copiedHint') : t('copyHint')}
                 </p>
               </div>
 
               {/* Players List */}
               <div className="panel p-5">
-                <h3 className="font-display text-lg font-bold">Players ({lobbyPlayers.length} of 2)</h3>
+                <h3 className="font-display text-lg font-bold">{t('playersCount', { count: lobbyPlayers.length })}</h3>
                 <ul className="mt-3 space-y-2">
                   {lobbyPlayers.map((player) => (
                     <li
@@ -1764,21 +1794,21 @@ export default function JodaMemory() {
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate font-semibold">{player.name}</span>
-                        {player.isHost && <span className="chip px-2 py-0.5 text-xs">Host</span>}
+                        {player.isHost && <span className="chip px-2 py-0.5 text-xs">{t('host')}</span>}
                       </div>
                       {player.isReady ? (
                         <span className="chip shrink-0 text-white ring-gold/50">
                           <Check className="h-4 w-4 text-gold" aria-hidden="true" />
-                          Ready
+                          {t('ready')}
                         </span>
                       ) : (
-                        <span className="chip shrink-0">Not ready</span>
+                        <span className="chip shrink-0">{t('notReady')}</span>
                       )}
                     </li>
                   ))}
                   {lobbyPlayers.length < 2 && (
                     <li className="rounded-xl border border-dashed border-white/20 px-4 py-3 text-chalk">
-                      Waiting for your friend to join…
+                      {t('waitingFriendJoin')}
                     </li>
                   )}
                 </ul>
@@ -1793,9 +1823,9 @@ export default function JodaMemory() {
                     <EyeOff className="mt-0.5 h-5 w-5 shrink-0 text-chalk" aria-hidden="true" />
                   )}
                   <div>
-                    <p id="memory-visibility-label" className="font-semibold">Show cards on their turn</p>
+                    <p id="memory-visibility-label" className="font-semibold">{t('showCardsLabel')}</p>
                     <p className="text-sm text-chalk">
-                      {showOpponentMoves ? 'You can see the cards your friend flips.' : 'Cards are hidden while your friend plays.'}
+                      {showOpponentMoves ? t('showCardsOnHint') : t('cardsHiddenHint')}
                     </p>
                   </div>
                 </div>
@@ -1825,7 +1855,7 @@ export default function JodaMemory() {
                   </button>
                 ) : (
                   <span className="chip shrink-0">
-                    {showOpponentMoves ? 'On' : 'Off'}
+                    {showOpponentMoves ? t('on') : t('off')}
                   </span>
                 )}
               </div>
@@ -1833,12 +1863,12 @@ export default function JodaMemory() {
               {/* Action Buttons */}
               <p className="text-chalk" aria-live="polite">
                 {lobbyPlayers.length < 2
-                  ? 'Waiting for your friend to join…'
+                  ? t('waitingFriendJoin')
                   : !lobbyPlayers.every(p => p.isReady)
-                    ? 'The game can start when both players are ready.'
+                    ? t('lobbyBothReady')
                     : isHost
-                      ? 'Everyone is ready. Start the game when you are.'
-                      : 'Everyone is ready. Waiting for the host to start the game.'}
+                      ? t('lobbyHostStart')
+                      : t('lobbyWaitHost')}
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 {isHost && (
@@ -1851,12 +1881,12 @@ export default function JodaMemory() {
                     }
                     className="btn-gold"
                   >
-                    Start game
+                    {t('startGame')}
                   </button>
                 )}
-                {isHost && startError && (
+                {isHost && startError !== null && (
                   <p role="alert" className="text-sm text-chalk">
-                    {startError}
+                    {startErrorText(startError)}
                   </p>
                 )}
 
@@ -1867,30 +1897,30 @@ export default function JodaMemory() {
                   className="btn-quiet"
                 >
                   {isReady ? <Check className="h-4 w-4 text-gold" aria-hidden="true" /> : null}
-                  {isReady ? "I'm ready" : 'Mark me ready'}
+                  {isReady ? t('imReady') : t('markReady')}
                 </button>
 
                 <button
                   onClick={handleBackToMenu}
                   className="btn-quiet sm:ml-auto"
                 >
-                  Leave room
+                  {t('leaveRoom')}
                 </button>
               </div>
             </section>
           ) : (
             /* Single Player Difficulty Selection */
             <section aria-labelledby="memory-difficulty-title" className="max-w-md">
-              <h2 id="memory-difficulty-title" className="title-md mb-4">Choose a difficulty</h2>
+              <h2 id="memory-difficulty-title" className="title-md mb-4">{t('chooseDifficulty')}</h2>
               <div
                 role="group"
                 aria-labelledby="memory-difficulty-title"
                 className="grid grid-cols-3 gap-1 rounded-2xl bg-felt-deep p-1 ring-1 ring-inset ring-table-rim"
               >
                 {([
-                  ['easy', 'Easy', '8 cards'],
-                  ['medium', 'Medium', '16 cards'],
-                  ['hard', 'Hard', '24 cards'],
+                  ['easy', t('easy'), t('cardsCount', { count: 8 })],
+                  ['medium', t('medium'), t('cardsCount', { count: 16 })],
+                  ['hard', t('hard'), t('cardsCount', { count: 24 })],
                 ] as const).map(([value, label, count]) => (
                   <button
                     key={value}
@@ -1907,7 +1937,7 @@ export default function JodaMemory() {
                 ))}
               </div>
               <p className="mt-3 text-sm text-chalk">
-                {bestTime ? `Your best time on this level: ${formatTime(bestTime)}` : 'No best time on this level yet.'}
+                {bestTime ? t('bestOnLevel', { time: formatTime(bestTime) }) : t('noBestYet')}
               </p>
 
               <div className="mt-6 flex flex-col gap-2 sm:flex-row">
@@ -1917,13 +1947,13 @@ export default function JodaMemory() {
                   className="btn-gold sm:flex-1"
                 >
                   <Play className="h-4 w-4" aria-hidden="true" />
-                  Start game
+                  {t('startGame')}
                 </button>
                 <button
                   onClick={handleBackToMode}
                   className="btn-quiet"
                 >
-                  Back
+                  {t('back')}
                 </button>
               </div>
             </section>
@@ -1942,14 +1972,14 @@ export default function JodaMemory() {
                     {gameMode === 'single' ? (
                       <>
                         <Bot className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
-                        <h3 className="title-md mt-3">The computer is playing</h3>
-                        <p className="mt-1 text-chalk">Your turn is next.</p>
+                        <h3 className="title-md mt-3">{t('computerPlaying')}</h3>
+                        <p className="mt-1 text-chalk">{t('yourTurnNext')}</p>
                       </>
                     ) : (
                       <>
                         <Clock className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
-                        <h3 className="title-md mt-3">Their turn</h3>
-                        <p className="mt-1 text-chalk">Cards are hidden while your friend plays.</p>
+                        <h3 className="title-md mt-3">{t('theirTurn')}</h3>
+                        <p className="mt-1 text-chalk">{t('cardsHiddenHint')}</p>
                       </>
                     )}
                   </div>
@@ -1963,18 +1993,18 @@ export default function JodaMemory() {
                     <Pause className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
                     {canResume ? (
                       <>
-                        <h3 className="title-md mt-3">Game paused</h3>
-                        <p className="mt-1 text-chalk">The timer is stopped. Resume when you&apos;re ready.</p>
+                        <h3 className="title-md mt-3">{t('gamePaused')}</h3>
+                        <p className="mt-1 text-chalk">{t('pausedBody')}</p>
                         <button onClick={() => requestPause(false)} className="btn-gold mt-5 w-full" autoFocus>
                           <Play className="h-4 w-4" aria-hidden="true" />
-                          Resume game
+                          {t('resumeGame')}
                         </button>
                       </>
                     ) : (
                       <>
-                        <h3 className="title-md mt-3">{pauseOwner?.name ?? 'Your friend'} paused the game</h3>
+                        <h3 className="title-md mt-3">{t('pausedByTitle', { name: pauseOwner?.name || t('yourFriend') })}</h3>
                         <p className="mt-1 text-chalk">
-                          The timer is stopped. Only {pauseOwner?.name ?? 'they'} can resume it.
+                          {pauseOwner?.name ? t('onlyNameCanResume', { name: pauseOwner.name }) : t('onlyPauserCanResume')}
                         </p>
                       </>
                     )}
@@ -1993,13 +2023,14 @@ export default function JodaMemory() {
                   type="button"
                   onClick={() => handleCardClick(card.id)}
                   disabled={card.isMatched || card.isFlipped || !isMyTurn}
-                  aria-label={`Card ${index + 1}, ${
-                    card.isMatched
-                      ? 'matched'
+                  aria-label={t('cardAria', {
+                    number: index + 1,
+                    state: card.isMatched
+                      ? t('cardMatched')
                       : faceUp
-                        ? `face up, ${card.iconName.replace('img', 'picture ')}`
-                        : 'face down'
-                  }`}
+                        ? t('cardFaceUp', { picture: card.iconName.replace('img', '') })
+                        : t('cardFaceDown'),
+                  })}
                   className={`flip-scene aspect-[3/4] w-full rounded-card transition-[opacity,transform,visibility] duration-300 ${
                     // Matched pairs leave the table but keep their slot so the grid doesn't shift
                     card.isMatched ? 'invisible scale-75 opacity-0' : ''
@@ -2087,7 +2118,7 @@ export default function JodaMemory() {
                   className="btn-quiet btn-sm min-h-11"
                 >
                   {gamePaused ? <Play className="h-4 w-4" aria-hidden="true" /> : <Pause className="h-4 w-4" aria-hidden="true" />}
-                  {gamePaused ? (canResume ? 'Resume' : `Paused by ${pauseOwner?.name ?? 'your friend'}`) : 'Pause'}
+                  {gamePaused ? (canResume ? t('resume') : t('pausedByButton', { name: pauseOwner?.name || t('yourFriend') })) : t('pause')}
                 </button>
               )}
               {/* In multiplayer new cards only come from "Next round"; the server rejects mid-round deals */}
@@ -2097,7 +2128,7 @@ export default function JodaMemory() {
                   className="btn-quiet btn-sm min-h-11"
                 >
                   <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  Restart
+                  {t('restart')}
                 </button>
               )}
               {gameStarted && !gameWon && (
@@ -2107,14 +2138,14 @@ export default function JodaMemory() {
                     className="btn-quiet btn-sm min-h-11 sm:ml-auto"
                   >
                     <Home className="h-4 w-4" aria-hidden="true" />
-                    Menu
+                    {t('menu')}
                   </button>
                   <button
                     onClick={handleBackToMenu}
                     className="btn-quiet btn-sm min-h-11"
                   >
                     <LogOut className="h-4 w-4" aria-hidden="true" />
-                    Quit game
+                    {t('quitGame')}
                   </button>
                 </>
               )}
@@ -2122,16 +2153,49 @@ export default function JodaMemory() {
           </>
         )}
 
-        {/* Instructions */}
+        {/* How to play: one disclosure per topic so the guide stays short on phones (the first one starts open) */}
         {!gameStarted && (
           <section aria-labelledby="memory-how-title" className="panel mt-10 max-w-2xl p-5 sm:p-6">
-            <h2 id="memory-how-title" className="title-md">How to play</h2>
-            <ul className="mt-3 list-disc space-y-1.5 pl-5 text-chalk marker:text-gold">
-              <li>Flip two cards per turn. If the pictures match, you keep the pair.</li>
-              <li>If they don&apos;t match, both cards turn face down again. Remember where they were.</li>
-              <li>Playing solo: clear the board in as little time and as few moves as you can.</li>
-              <li>With a friend: take turns. Most pairs wins the round, and the first to win 4 rounds wins the game.</li>
-            </ul>
+            <h2 id="memory-how-title" className="title-md">{th('title')}</h2>
+            <p className="mt-1 text-sm text-chalk">{th('intro')}</p>
+            <div className="mt-3 divide-y divide-white/10 border-t border-white/10">
+              {[
+                { id: 'goal', title: th('goalTitle'), note: th('goal1') },
+                { id: 'turn', title: th('turnTitle'), items: [th('turn1'), th('turn2'), th('turn3'), th('turn4')] },
+                { id: 'solo', title: th('soloTitle'), items: [th('solo1'), th('solo2'), th('solo3'), th('solo4')] },
+                {
+                  id: 'friend',
+                  title: th('friendTitle'),
+                  steps: [th('friend1'), th('friend2'), th('friend3'), th('friend4'), th('friend5')],
+                  note: th('friendOnline'),
+                },
+                { id: 'rounds', title: th('roundsTitle'), items: [th('rounds1'), th('rounds2'), th('rounds3'), th('rounds4'), th('rounds5')] },
+                { id: 'options', title: th('optionsTitle'), items: [th('options1'), th('options2')] },
+                { id: 'leaving', title: th('leavingTitle'), items: [th('leaving1'), th('leaving2'), th('leaving3')] },
+                { id: 'leaderboard', title: th('leaderboardTitle'), items: [th('leaderboard1'), th('leaderboard2')] },
+                { id: 'tips', title: th('tipsTitle'), items: [th('tip1'), th('tip2'), th('tip3'), th('tip4')] },
+              ].map((section, i) => (
+                <details key={section.id} open={i === 0} className="group">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 py-2 [&::-webkit-details-marker]:hidden">
+                    <h3 className="font-display text-lg font-bold">{section.title}</h3>
+                    <ChevronDown className="h-5 w-5 shrink-0 text-chalk transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4 text-chalk">
+                    {section.steps && (
+                      <ol className="list-decimal space-y-1.5 pl-5 marker:font-semibold marker:text-gold">
+                        {section.steps.map(step => <li key={step}>{step}</li>)}
+                      </ol>
+                    )}
+                    {section.items && (
+                      <ul className="list-disc space-y-1.5 pl-5 marker:text-gold">
+                        {section.items.map(item => <li key={item}>{item}</li>)}
+                      </ul>
+                    )}
+                    {section.note && <p className={section.steps ? 'mt-3' : ''}>{section.note}</p>}
+                  </div>
+                </details>
+              ))}
+            </div>
           </section>
         )}
       </main>
@@ -2148,25 +2212,25 @@ export default function JodaMemory() {
             {/* Close button */}
             <button
               onClick={() => setShowInviteModal(false)}
-              aria-label="Close"
+              aria-label={t('close')}
               className="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-lg text-chalk transition hover:bg-white/10 hover:text-white"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
 
             <div className="mb-5 pr-10">
-              <h2 id="memory-invite-title" className="title-md">Invite a friend</h2>
-              <p className="mt-1 text-chalk">Send this link to a friend so they can join your game.</p>
+              <h2 id="memory-invite-title" className="title-md">{t('inviteFriend')}</h2>
+              <p className="mt-1 text-chalk">{t('inviteFriendBody')}</p>
             </div>
 
             <div className="mb-4">
-              <label htmlFor="memory-invite-link" className="field-label">Game link</label>
+              <label htmlFor="memory-invite-link" className="field-label">{t('gameLink')}</label>
               <div className="flex items-center gap-2">
                 <input
                   id="memory-invite-link"
                   type="text"
                   readOnly
-                  value={typeof window !== 'undefined' ? `${window.location.href}?gameId=placeholder123` : 'Loading...'}
+                  value={typeof window !== 'undefined' ? `${window.location.href}?gameId=placeholder123` : t('loading')}
                   className="field min-w-0 flex-1 text-sm"
                   onClick={(e) => e.currentTarget.select()}
                 />
@@ -2188,20 +2252,20 @@ export default function JodaMemory() {
                   }}
                   className="btn-quiet shrink-0"
                 >
-                  Copy link
+                  {t('copyLink')}
                 </button>
               </div>
             </div>
 
             <p className="mb-6 text-sm text-chalk">
-              When your friend opens the link, they join your game and you can start playing together.
+              {t('inviteModalHint')}
             </p>
 
             <button
               onClick={() => setShowInviteModal(false)}
               className="btn-quiet w-full"
             >
-              Close
+              {t('close')}
             </button>
           </div>
         </div>
@@ -2217,11 +2281,11 @@ export default function JodaMemory() {
               <div className="flex items-center justify-between border-b border-white/10 py-1 pl-4 pr-1">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-5 w-5 text-chalk" aria-hidden="true" />
-                  <h3 className="font-semibold">Chat</h3>
+                  <h3 className="font-semibold">{t('chat')}</h3>
                 </div>
                 <button
                   onClick={() => setShowChat(false)}
-                  aria-label="Close chat"
+                  aria-label={t('closeChat')}
                   className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-chalk transition hover:bg-white/10 hover:text-white"
                 >
                   <X className="h-5 w-5" aria-hidden="true" />
@@ -2231,7 +2295,7 @@ export default function JodaMemory() {
               {/* Messages List */}
               <div className="flex-1 space-y-2 overflow-y-auto p-4" aria-live="polite">
                 {chatMessages.length === 0 ? (
-                  <p className="text-sm text-chalk">No messages yet. Say hi.</p>
+                  <p className="text-sm text-chalk">{t('noMessages')}</p>
                 ) : (
                   chatMessages.map((msg, index) => (
                     <div
@@ -2259,15 +2323,15 @@ export default function JodaMemory() {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Type a message"
-                    aria-label="Message"
+                    placeholder={t('typeMessage')}
+                    aria-label={t('message')}
                     className="field min-w-0 flex-1 px-3 py-2"
                     maxLength={200}
                   />
                   <button
                     onClick={handleSendMessage}
                     disabled={!chatInput.trim()}
-                    aria-label="Send message"
+                    aria-label={t('sendMessage')}
                     className="btn-quiet btn-sm min-h-11 shrink-0"
                   >
                     <Send className="h-4 w-4" aria-hidden="true" />
@@ -2279,7 +2343,7 @@ export default function JodaMemory() {
             /* Minimized Chat Button */
             <button
               onClick={() => setShowChat(true)}
-              aria-label={chatMessages.length > 0 ? `Open chat, ${chatMessages.length} messages` : 'Open chat'}
+              aria-label={chatMessages.length > 0 ? t('openChatCount', { count: chatMessages.length }) : t('openChat')}
               className="relative inline-flex h-14 w-14 items-center justify-center rounded-full bg-table text-white shadow-lift ring-1 ring-inset ring-table-rim transition hover:bg-table-rim"
             >
               <MessageSquare className="h-6 w-6" aria-hidden="true" />
@@ -2298,25 +2362,24 @@ export default function JodaMemory() {
 
 // Only the host can deal the next round; the other player waits for the deal to arrive
 function NextRoundActions({ isHost, onNextRound, onLeave }: { isHost: boolean; onNextRound: () => void; onLeave: () => void }) {
+  const t = useT(gameMessages);
   return (
     <div className="mt-6 flex flex-col gap-2">
       {isHost ? (
         <button type="button" onClick={onNextRound} className="btn-gold" autoFocus>
-          Next round
+          {t('nextRound')}
         </button>
       ) : (
         <p className="text-center text-sm text-chalk" aria-live="polite">
-          Waiting for the host to deal the next round…
+          {t('waitingHostDeal')}
         </p>
       )}
       <button type="button" onClick={onLeave} className="btn-quiet" autoFocus={!isHost}>
-        Leave game
+        {t('leaveGame')}
       </button>
     </div>
   );
 }
-
-const DIFFICULTY_LABEL: Record<Difficulty, string> = { easy: 'easy', medium: 'medium', hard: 'hard' };
 
 // Tells the solo player whether their time reached the leaderboard
 function SoloSaveStatus({
@@ -2329,32 +2392,35 @@ function SoloSaveStatus({
     | null;
   difficulty: Difficulty;
 }) {
+  const t = useT(gameMessages);
   if (!save) return null;
+  // The sign-in link sits mid-sentence; word order differs per language
+  const [signedOutBefore, signedOutAfter = ''] = t('notSignedIn').split('{link}');
   return (
     <div className="mt-4 rounded-xl bg-felt-deep/60 p-3 text-sm" aria-live="polite">
-      {save.status === 'saving' && <p className="text-chalk">Saving your time…</p>}
+      {save.status === 'saving' && <p className="text-chalk">{t('savingTime')}</p>}
       {save.status === 'saved' && (
         <p className="text-chalk">
           {save.personalBest
-            ? `New personal best on ${DIFFICULTY_LABEL[difficulty]}, saved to your profile.`
-            : 'Saved to your profile. Your best time on this level is still faster.'}{' '}
+            ? t('newPersonalBest', { level: t(`${difficulty}Lower`) })
+            : t('savedNotBest')}{' '}
           <Link href="/profile" className="font-semibold text-gold underline-offset-2 hover:underline">
-            See your profile
+            {t('seeProfile')}
           </Link>
         </p>
       )}
       {save.status === 'saved' && <LeaderboardNameForm />}
       {save.status === 'signed-out' && (
         <p className="text-chalk">
-          Your time wasn&apos;t saved because you aren&apos;t signed in.{' '}
+          {signedOutBefore}
           <Link href="/login" className="font-semibold text-gold underline-offset-2 hover:underline">
-            Sign in or play as a guest
-          </Link>{' '}
-          to keep your best times on your profile.
+            {t('signInOrGuest')}
+          </Link>
+          {signedOutAfter}
         </p>
       )}
       {save.status === 'error' && (
-        <p className="text-chalk">Couldn&apos;t save your time. Check your connection; your next game will try again.</p>
+        <p className="text-chalk">{t('saveError')}</p>
       )}
     </div>
   );
@@ -2399,11 +2465,15 @@ function getPlayerKey(): string {
 }
 
 function ReconnectingNotice({ name }: { name: string }) {
+  const t = useT(gameMessages);
+  const [before, after = ''] = t('reconnecting').split('{name}');
   return (
     <div role="status" className="flex items-center gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-gold/40">
       <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-gold" aria-hidden="true" />
       <p className="text-sm text-chalk">
-        <span className="font-semibold text-white">{name}</span> lost their connection. Waiting for them to come back…
+        {before}
+        <span className="font-semibold text-white">{name}</span>
+        {after}
       </p>
     </div>
   );
@@ -2416,12 +2486,13 @@ function isDefaultGuestName(name: string | null | undefined): boolean {
 
 // Lets a guest with an auto-generated name choose the name other players see, right after a win
 function LeaderboardNameForm() {
+  const t = useT(gameMessages);
   const { user, refreshSession } = useAuth();
   const [name, setName] = useState('');
   const [state, setState] = useState<{ status: 'idle' | 'saving' | 'saved' } | { status: 'error'; message: string }>({ status: 'idle' });
   if (!user || (!isDefaultGuestName(user.name) && state.status !== 'saved')) return null;
   if (state.status === 'saved') {
-    return <p className="mt-2 text-chalk" aria-live="polite">Saved. Other players now see you as {user.name}.</p>;
+    return <p className="mt-2 text-chalk" aria-live="polite">{t('nameSavedAs', { name: user.name })}</p>;
   }
 
   const save = async (e: React.FormEvent) => {
@@ -2436,20 +2507,36 @@ function LeaderboardNameForm() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setState({ status: 'error', message: body.error ?? "Couldn't save your name. Try again." });
+        setState({ status: 'error', message: body.error ?? '' });
         return;
       }
       await refreshSession();
       setState({ status: 'saved' });
     } catch {
-      setState({ status: 'error', message: "Couldn't save your name. Check your connection and try again." });
+      setState({ status: 'error', message: 'offline' });
     }
   };
+
+  // The server's validation messages are English; show the known ones translated
+  const errorText = (message: string) =>
+    message === 'offline'
+      ? t('nameSaveOffline')
+      : message === ''
+        ? t('nameSaveFailed')
+        : message.includes('Name is required')
+          ? t('errNameRequired')
+          : message.includes('between 2 and 20')
+            ? t('errNameLength')
+            : message.includes('can only contain')
+              ? t('errNameChars')
+              : message.includes('are reserved')
+                ? t('errNameReserved')
+                : message;
 
   return (
     <form onSubmit={save} className="mt-3 border-t border-white/10 pt-3">
       <label htmlFor="leaderboard-name" className="field-label">
-        Choose the name other players see
+        {t('chooseLeaderboardName')}
       </label>
       <div className="flex gap-2">
         <input
@@ -2462,11 +2549,11 @@ function LeaderboardNameForm() {
           className="field min-w-0 flex-1 py-2"
         />
         <button type="submit" disabled={name.trim().length < 2 || state.status === 'saving'} className="btn-quiet btn-sm shrink-0">
-          {state.status === 'saving' ? 'Saving…' : 'Save'}
+          {state.status === 'saving' ? t('saving') : t('save')}
         </button>
       </div>
       {state.status === 'error' && (
-        <p role="alert" className="mt-2 text-white">{state.message}</p>
+        <p role="alert" className="mt-2 text-white">{errorText(state.message)}</p>
       )}
     </form>
   );

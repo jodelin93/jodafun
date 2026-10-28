@@ -7,9 +7,12 @@ import { authClient, continueAsGuest } from '../lib/auth-client';
 import SiteHeader from '../components/ui/SiteHeader';
 import PlayingCard from '../components/ui/PlayingCard';
 import { AlertCircle, Brain } from 'lucide-react';
+import { useT } from '../i18n/I18nProvider';
+import { authMessages, authErrorKey } from '../i18n/messages/auth';
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useT(authMessages);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -28,13 +31,14 @@ export default function LoginPage() {
       });
 
       if (result.error) {
-        setError(result.error.message || "Couldn't sign in. Check your email and password.");
+        const key = authErrorKey(result.error.message);
+        setError(key ? t(key) : result.error.message || t('signInFailed'));
       } else {
         // Redirect to home or dashboard
         router.push('/');
       }
     } catch (err) {
-      setError('Something went wrong. Try again in a moment.');
+      setError(t('somethingWrong'));
       console.error('Login error:', err);
     } finally {
       setLoading(false);
@@ -49,7 +53,7 @@ export default function LoginPage() {
       await continueAsGuest();
       router.push('/');
     } catch (err) {
-      setError("Couldn't start a guest session. Check your connection and try again.");
+      setError(t('guestFailed'));
       console.error('Guest login error:', err);
     } finally {
       setGuestLoading(false);
@@ -62,8 +66,8 @@ export default function LoginPage() {
       <main className="page py-8 sm:py-12">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           <div className="panel mx-auto w-full max-w-md p-6 sm:p-8 lg:mx-0">
-            <h1 className="title-lg">Sign in</h1>
-            <p className="mt-2 text-chalk">Pick up where you left off.</p>
+            <h1 className="title-lg">{t('signIn')}</h1>
+            <p className="mt-2 text-chalk">{t('signInIntro')}</p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               {error && (
@@ -74,7 +78,7 @@ export default function LoginPage() {
               )}
 
               <div>
-                <label htmlFor="email" className="field-label">Email</label>
+                <label htmlFor="email" className="field-label">{t('email')}</label>
                 <input
                   id="email"
                   type="email"
@@ -87,7 +91,7 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="field-label">Password</label>
+                <label htmlFor="password" className="field-label">{t('password')}</label>
                 <input
                   id="password"
                   type="password"
@@ -96,19 +100,19 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="field"
-                  placeholder="Your password"
+                  placeholder={t('passwordPlaceholder')}
                 />
               </div>
 
               <button type="submit" disabled={loading} className="btn-gold w-full">
-                {loading ? 'Signing in…' : 'Sign in'}
+                {loading ? t('signingIn') : t('signIn')}
               </button>
             </form>
 
             <p className="mt-6 text-chalk">
-              New here?{' '}
+              {t('newHere')}{' '}
               <Link href="/signup" className="font-semibold text-white underline underline-offset-4 hover:text-gold">
-                Create an account
+                {t('createAnAccount')}
               </Link>
             </p>
           <div className="mt-6 border-t border-table-rim pt-6">
@@ -118,7 +122,7 @@ export default function LoginPage() {
               disabled={guestLoading || loading}
               className="btn-quiet w-full"
             >
-              {guestLoading ? 'Setting up your guest account…' : 'Play as a guest'}
+              {guestLoading ? t('settingUpGuest') : t('playAsGuest')}
             </button>
           </div>
           </div>
@@ -133,7 +137,7 @@ export default function LoginPage() {
                 </div>
               </PlayingCard>
             </div>
-            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">Your scores and recent games are waiting at the table.</p>
+            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">{t('loginAside')}</p>
           </aside>
         </div>
       </main>

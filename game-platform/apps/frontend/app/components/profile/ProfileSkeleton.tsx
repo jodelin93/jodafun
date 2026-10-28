@@ -1,6 +1,10 @@
+import { useT } from '../../i18n/I18nProvider';
+import { profileMessages } from '../../i18n/messages/profile';
+
 export default function ProfileSkeleton() {
+  const t = useT(profileMessages);
   return (
-    <div role="status" aria-label="Loading the profile">
+    <div role="status" aria-label={t('loadingProfile')}>
       <div className="h-9 w-48 rounded bg-white/10" />
       <div className="mt-3 h-5 w-40 rounded bg-white/10" />
       <div className="panel mt-8 h-24" />

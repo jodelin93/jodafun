@@ -1,14 +1,18 @@
 import type { LucideIcon } from 'lucide-react';
+import type { homeMessages } from '../i18n/messages/home';
 import { Brain, ChessKnight, Grid3x3, WholeWord, Lightbulb, Palette } from 'lucide-react';
+
+type MessageKey = keyof (typeof homeMessages)['en'];
 
 export type Game = {
   id: string;
   title: string;
-  description: string;
+  description: MessageKey;
   Icon: LucideIcon;
+  // Ranges only ("1–2", "5–15"); the labels around them are translated where shown
   players: string;
   duration: string;
-  tags: string[];
+  tags: MessageKey[];
   available: boolean;
 };
 
@@ -17,61 +21,61 @@ export const GAMES: Game[] = [
   {
     id: 'joda-memory',
     title: 'Joda Memory',
-    description: 'Flip cards and find the matching pairs. Play alone to beat your best time, or take turns with a friend.',
+    description: 'descMemory',
     Icon: Brain,
-    players: '1–2 players',
-    duration: '5–15 min',
-    tags: ['Memory', 'Cards', 'Multiplayer'],
+    players: '1–2',
+    duration: '5–15',
+    tags: ['tagMemory', 'tagCards', 'tagMultiplayer'],
     available: true,
   },
   {
     id: 'classic-chess',
     title: 'Classic Chess',
-    description: 'The game of strategy, played against a friend.',
+    description: 'descChess',
     Icon: ChessKnight,
-    players: '2 players',
-    duration: '15–60 min',
-    tags: ['Strategy', 'Classic', 'Turn-based'],
+    players: '2',
+    duration: '15–60',
+    tags: ['tagStrategy', 'tagClassic', 'tagTurnBased'],
     available: false,
   },
   {
     id: 'speed-checkers',
     title: 'Speed Checkers',
-    description: 'Checkers with a timer on every turn.',
+    description: 'descCheckers',
     Icon: Grid3x3,
-    players: '2 players',
-    duration: '10–20 min',
-    tags: ['Strategy', 'Fast-paced', 'Classic'],
+    players: '2',
+    duration: '10–20',
+    tags: ['tagStrategy', 'tagFastPaced', 'tagClassic'],
     available: false,
   },
   {
     id: 'word-warriors',
     title: 'Word Warriors',
-    description: 'Build better words than your opponents to win the round.',
+    description: 'descWords',
     Icon: WholeWord,
-    players: '2–4 players',
-    duration: '10–20 min',
-    tags: ['Word Game', 'Multiplayer', 'Puzzle'],
+    players: '2–4',
+    duration: '10–20',
+    tags: ['tagWordGame', 'tagMultiplayer', 'tagPuzzle'],
     available: false,
   },
   {
     id: 'trivia-master',
     title: 'Trivia Master',
-    description: 'Answer questions across categories and see who knows the most.',
+    description: 'descTrivia',
     Icon: Lightbulb,
-    players: '1–8 players',
-    duration: '10–30 min',
-    tags: ['Trivia', 'Knowledge', 'Multiplayer'],
+    players: '1–8',
+    duration: '10–30',
+    tags: ['tagTrivia', 'tagKnowledge', 'tagMultiplayer'],
     available: false,
   },
   {
     id: 'color-match',
     title: 'Color Match',
-    description: 'Match colors as fast as you can. Speed and accuracy both count.',
+    description: 'descColor',
     Icon: Palette,
-    players: '1–4 players',
-    duration: '3–10 min',
-    tags: ['Reflex', 'Quick Game', 'Casual'],
+    players: '1–4',
+    duration: '3–10',
+    tags: ['tagReflex', 'tagQuickGame', 'tagCasual'],
     available: false,
   },
 ];

@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import { ArrowLeft, Clock, Users, X } from 'lucide-react';
+import { useT } from '../i18n/I18nProvider';
+import { gameMessages } from '../i18n/messages/game';
 
 export type OnlinePlayer = { id: string; name: string; isGuest: boolean; since: number };
 
@@ -31,9 +33,11 @@ type Props = {
 
 // Lists players who have Joda Memory open and aren't in a room, and sends them game requests
 export default function OnlinePlayers({ socket, name, onNameChange, playerKey, difficulty, onBack, onRoomReady }: Props) {
+  const t = useT(gameMessages);
   const [players, setPlayers] = useState<OnlinePlayer[] | null>(null);
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
-  const [sendError, setSendError] = useState<string | null>(null);
+  // The server's error text and who the request was for; translated when shown
+  const [sendError, setSendError] = useState<{ name: string; error?: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   // Keep the list fresh: on open, whenever the server says it changed, after reconnects, and as a fallback every 15s
@@ -87,7 +91,7 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
       { toId: player.id, playerKey, difficulty },
       (res: { success: boolean; inviteId?: string; expiresAt?: number; error?: string }) => {
         if (!res?.success || !res.inviteId) {
-          setSendError(res?.error === 'Player not available' ? `${player.name} isn't available anymore.` : res?.error ?? "Couldn't send the request.");
+          setSendError({ name: player.name, error: res?.error });
           return;
         }
         setNow(Date.now());
@@ -102,22 +106,41 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
     setOutgoing(null);
   };
 
+  // Known server errors in the visitor's language; anything else as sent
+  const sendErrorText = (e: { name: string; error?: string }) =>
+    e.error === 'Player not available'
+      ? t('notAvailable', { name: e.name })
+      : e.error === 'You are already in a room'
+        ? t('errAlreadyInRoom')
+        : e.error === 'You already have a pending request'
+          ? t('errPendingRequest')
+          : e.error === 'They already have a request'
+            ? t('errTheyHaveRequest')
+            : e.error === 'Too many requests'
+              ? t('errTooMany')
+              : e.error ?? t('sendFailed');
+
+  // Splits a "{name} …" message so the name keeps its emphasis
+  const [waitBefore, waitAfter = ''] = t('waitingAnswer').split('{name}');
+  const [declinedBefore, declinedAfter = ''] = t('declinedRequest').split('{name}');
+  const [noAnswerBefore, noAnswerAfter = ''] = t('noAnswer').split('{name}');
+
   const secondsLeft = outgoing?.status === 'waiting' ? Math.max(0, Math.ceil((outgoing.expiresAt - now) / 1000)) : 0;
 
   return (
     <section aria-labelledby="online-title" className="max-w-2xl space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 id="online-title" className="title-md">Players online</h2>
+        <h2 id="online-title" className="title-md">{t('playersOnline')}</h2>
         <button type="button" onClick={onBack} className="btn-quiet btn-sm min-h-11">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
+          {t('back')}
         </button>
       </div>
-      <p className="text-chalk">People with Joda Memory open who aren&apos;t in a game room. Send a request and start playing when they accept.</p>
+      <p className="text-chalk">{t('onlineIntro')}</p>
 
       <div className="panel p-5">
         <label htmlFor="online-name" className="field-label">
-          Your name (shown to other players)
+          {t('onlineNameLabel')}
         </label>
         <input
           id="online-name"
@@ -125,7 +148,7 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
           onChange={e => onNameChange(e.target.value)}
           maxLength={20}
           autoComplete="nickname"
-          placeholder="Choose a name"
+          placeholder={t('chooseNamePlaceholder')}
           className="field"
         />
       </div>
@@ -136,26 +159,32 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
             {outgoing.status === 'waiting' && (
               <>
                 <Clock className="mr-1.5 inline h-4 w-4 align-[-2px] text-gold" aria-hidden="true" />
-                Waiting for <span className="font-semibold text-white">{outgoing.toName}</span> to answer… {secondsLeft}s
+                {waitBefore}
+                <span className="font-semibold text-white">{outgoing.toName}</span>
+                {waitAfter.replace('{seconds}', String(secondsLeft))}
               </>
             )}
             {outgoing.status === 'declined' && (
               <>
-                <span className="font-semibold text-white">{outgoing.toName}</span> declined your request.
+                {declinedBefore}
+                <span className="font-semibold text-white">{outgoing.toName}</span>
+                {declinedAfter}
               </>
             )}
             {outgoing.status === 'expired' && (
               <>
-                <span className="font-semibold text-white">{outgoing.toName}</span> didn&apos;t answer in time.
+                {noAnswerBefore}
+                <span className="font-semibold text-white">{outgoing.toName}</span>
+                {noAnswerAfter}
               </>
             )}
           </p>
           {outgoing.status === 'waiting' ? (
             <button type="button" onClick={cancelRequest} className="btn-quiet btn-sm min-h-11 shrink-0">
-              Cancel
+              {t('cancel')}
             </button>
           ) : (
-            <button type="button" onClick={() => setOutgoing(null)} className="btn btn-sm min-h-11 shrink-0 text-chalk hover:text-white" aria-label="Dismiss">
+            <button type="button" onClick={() => setOutgoing(null)} className="btn btn-sm min-h-11 shrink-0 text-chalk hover:text-white" aria-label={t('dismiss')}>
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
@@ -164,29 +193,29 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
 
       {sendError && (
         <p role="alert" className="text-sm text-white">
-          {sendError}
+          {sendErrorText(sendError)}
         </p>
       )}
 
       {players === null ? (
         <div className="panel p-5 text-chalk" role="status">
-          Looking for players…
+          {t('lookingForPlayers')}
         </div>
       ) : players.length === 0 ? (
         <div className="panel p-5">
           <Users className="h-8 w-8 text-chalk" strokeWidth={1.5} aria-hidden="true" />
-          <p className="mt-3 font-semibold">Nobody else is online right now</p>
+          <p className="mt-3 font-semibold">{t('nobodyOnline')}</p>
           <p className="mt-1 text-sm text-chalk">
-            Keep this page open and you&apos;ll show up for others, or go back and create a room to send a friend the link.
+            {t('nobodyOnlineHint')}
           </p>
         </div>
       ) : (
-        <ul className="panel divide-y divide-table-rim overflow-hidden" aria-label="Players online">
+        <ul className="panel divide-y divide-table-rim overflow-hidden" aria-label={t('playersOnline')}>
           {players.map(player => (
             <li key={player.id} className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <p className="truncate font-semibold">{player.name}</p>
-                {player.isGuest && <span className="chip mt-1 px-2 py-0.5 text-xs">Guest</span>}
+                {player.isGuest && <span className="chip mt-1 px-2 py-0.5 text-xs">{t('guest')}</span>}
               </div>
               <button
                 type="button"
@@ -194,7 +223,7 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
                 disabled={outgoing?.status === 'waiting'}
                 className="btn-gold btn-sm min-h-11 shrink-0"
               >
-                Request game
+                {t('requestGame')}
               </button>
             </li>
           ))}
