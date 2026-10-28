@@ -37,6 +37,7 @@ model User {
   sessions          Session[]
   accounts          Account[]
   verifications     Verification[]
+  soloRuns          SoloRun[]
 
   @@index([username])
   @@index([email])
@@ -180,4 +181,22 @@ model Verification {
 
   @@unique([identifier, value])
   @@map("verifications")
+}
+
+// Completed single-player runs, used for the solo leaderboard
+model SoloRun {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  gameType    String   @default("joda-memory") @map("game_type") @db.VarChar(50)
+  difficulty  String   @db.VarChar(10)
+  timeSeconds Int      @map("time_seconds")
+  moves       Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([gameType, difficulty, timeSeconds])
+  @@index([userId])
+  @@map("solo_runs")
 }
