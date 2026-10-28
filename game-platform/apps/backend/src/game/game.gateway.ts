@@ -182,11 +182,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
   // A player's own seat in this room: same tab (playerKey), or a dropped seat of the same signed-in user (new tab/window)
   private findOwnSeat(room: GameRoom, playerKey: unknown, userId: string | null): Player | undefined {
-    if (typeof playerKey === 'string' && playerKey) {
-      const byKey = room.players.find(p => p.playerKey === playerKey);
-      if (byKey) return byKey;
-    }
-    return userId ? room.players.find(p => p.userId === userId && !p.connected) : undefined;
+    // Only the same browser (playerKey) gets a seat back. Matching by account let a second device
+    // signed in to the same account take over the first device's seat, leaving a one-player game.
+    if (typeof playerKey !== 'string' || !playerKey) return undefined;
+    return room.players.find(p => p.playerKey === playerKey);
   }
 
   // Move a held seat onto the caller's socket and return the room plus, mid-game, the board to resync from
@@ -430,6 +429,11 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
     if (room.hostId !== client.id) {
       return { success: false, error: 'Only host can start the game' };
+    }
+
+    // A deal needs both players at the table; otherwise every turn passes back to the same player
+    if (room.players.length !== 2 || room.players.some(p => !p.connected)) {
+      return { success: false, error: 'Waiting for your friend' };
     }
 
     // New cards only between rounds: re-dealing mid-round would let the player who is behind wipe the board

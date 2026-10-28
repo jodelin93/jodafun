@@ -192,6 +192,7 @@ export default function JodaMemory() {
   const [othersOnline, setOthersOnline] = useState(0);
   const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; expiresAt: number } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const [inviteNow, setInviteNow] = useState(() => Date.now());
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -1194,7 +1195,12 @@ export default function JodaMemory() {
     if (!socketRef.current || !roomId || !isHost) return;
 
     // The server shuffles and deals; the host only picks the size of the deck
-    socketRef.current.emit('startGame', { roomId, difficulty });
+    setStartError(null);
+    socketRef.current.emit('startGame', { roomId, difficulty }, (res: { success: boolean; error?: string }) => {
+      if (res && !res.success) {
+        setStartError(res.error === 'Waiting for your friend' ? 'Waiting for your friend to be connected and in the room…' : res.error ?? "Couldn't start the game.");
+      }
+    });
   };
 
   const handleSendMessage = () => {
@@ -1838,11 +1844,20 @@ export default function JodaMemory() {
                 {isHost && (
                   <button
                     onClick={handleMultiplayerStartGame}
-                    disabled={!lobbyPlayers.every(p => p.isReady) || lobbyPlayers.length < 2}
+                    disabled={
+                      !lobbyPlayers.every(p => p.isReady) ||
+                      lobbyPlayers.length < 2 ||
+                      lobbyPlayers.some(p => (p as { connected?: boolean }).connected === false)
+                    }
                     className="btn-gold"
                   >
                     Start game
                   </button>
+                )}
+                {isHost && startError && (
+                  <p role="alert" className="text-sm text-chalk">
+                    {startError}
+                  </p>
                 )}
 
                 <button
@@ -2369,14 +2384,14 @@ type RejoinResponse =
       };
     };
 
-// A random id per browser tab so the server can hand our seat back after the connection drops
+// A random id per browser so the server can hand our seat back after a drop, reload or new tab.
+// Each device has its own, so two devices on the same account are always two different players.
 function getPlayerKey(): string {
+  const KEY = 'joda-player-key';
   try {
-    let key = sessionStorage.getItem('joda-player-key');
-    if (!key) {
-      key = crypto.randomUUID();
-      sessionStorage.setItem('joda-player-key', key);
-    }
+    let key = localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY);
+    if (!key) key = crypto.randomUUID();
+    localStorage.setItem(KEY, key);
     return key;
   } catch {
     return (window as unknown as { __jodaPlayerKey?: string }).__jodaPlayerKey ??= crypto.randomUUID();
