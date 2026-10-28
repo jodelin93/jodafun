@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { LogOut, X } from 'lucide-react';
+import { clearCurrentRoom, readCurrentRoom, roomPath, subscribeCurrentRoom, type CurrentRoom } from '../../lib/currentRoom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import Logo from './Logo';
@@ -28,6 +30,24 @@ export default function SiteHeader() {
   };
 
   const isGuest = user?.email.includes('@guest.local');
+
+  // A room this browser stepped out of (back, refresh, menu, another page) while the server still holds the seat
+  const [openRoom, setOpenRoom] = useState<CurrentRoom | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const room = readCurrentRoom();
+      const params = new URLSearchParams(window.location.search);
+      const insideIt = window.location.pathname === '/games/joda-memory' && params.get('roomId')?.toUpperCase() === room?.roomId;
+      setOpenRoom(room && !insideIt ? room : null);
+    };
+    update();
+    const unsubscribe = subscribeCurrentRoom(update);
+    const timer = setInterval(update, 15000);
+    return () => {
+      unsubscribe();
+      clearInterval(timer);
+    };
+  }, [pathname]);
 
   const navLinks = NAV.map(({ href, label }) => {
     const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -91,6 +111,30 @@ export default function SiteHeader() {
       <nav aria-label="Main" className="page flex gap-1 pb-2 md:hidden">
         {navLinks}
       </nav>
+
+      {openRoom && (
+        <div className="border-t border-gold/30 bg-felt" role="status">
+          <div className="page flex items-center justify-between gap-3 py-2">
+            <p className="min-w-0 text-sm text-chalk">
+              Your game room{' '}
+              <span className="font-display font-bold tracking-[0.15em] text-white">{openRoom.roomId}</span> is still open.
+            </p>
+            <div className="flex shrink-0 items-center gap-1">
+              <Link href={roomPath(openRoom.roomId)} className="btn-gold btn-sm">
+                Return to room
+              </Link>
+              <button
+                type="button"
+                onClick={clearCurrentRoom}
+                className="btn btn-sm text-chalk hover:text-white"
+                aria-label="Hide this reminder"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

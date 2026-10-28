@@ -7,6 +7,7 @@ import { getSoundManager } from '../lib/sounds/soundManager';
 import SoundControls from './SoundControls';
 import SiteHeader from './ui/SiteHeader';
 import { useAuth } from '../contexts/AuthContext';
+import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -147,6 +148,8 @@ export default function JodaMemory() {
   const [gameStarted, setGameStarted] = useState(false);
   const [gameWon, setGameWon] = useState(false);
   const [gamePaused, setGamePaused] = useState(false);
+  // Multiplayer: who paused (player id + name); only they can resume
+  const [pauseOwner, setPauseOwner] = useState<{ id: string; name: string } | null>(null);
   const [soundInitialized, setSoundInitialized] = useState(false);
   const [moves, setMoves] = useState(0);
   const [timer, setTimer] = useState(0);
@@ -179,7 +182,7 @@ export default function JodaMemory() {
   const [myPlayerIndex, setMyPlayerIndex] = useState(0);
   const [roundTied, setRoundTied] = useState(false);
   // Name of the player who just left, and whether that ended a game in progress
-  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean } | null>(null);
+  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean; reachedRound: number } | null>(null);
   const { user, refreshSession } = useAuth();
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
@@ -197,6 +200,8 @@ export default function JodaMemory() {
   const roundsDealtRef = useRef(0);
 
   const isMyTurn = gameMode === 'multiplayer' ? currentPlayerIndex === myPlayerIndex : currentPlayerIndex === 0;
+  // Solo can always resume; in multiplayer only the player who paused
+  const canResume = gameMode !== 'multiplayer' || !pauseOwner || pauseOwner.id === players[myPlayerIndex]?.id;
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const aiTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -308,6 +313,15 @@ export default function JodaMemory() {
     // Note: AI turn (currentPlayerIndex === 1 in single mode) does not play myTurn sound
   }, [currentPlayerIndex, isMyTurn, gameStarted, gameWon, soundInitialized, moves]);
 
+  // Remember the room while we're in it, so stepping out (back, refresh, menu, another page) offers a way back
+  const inRoomNow = gameMode === 'multiplayer' && Boolean(roomId) && (isInLobby || gameStarted);
+  useEffect(() => {
+    if (!inRoomNow || !roomId) return;
+    saveCurrentRoom(roomId);
+    const refresh = setInterval(() => saveCurrentRoom(roomId), 20000);
+    return () => clearInterval(refresh);
+  }, [inRoomNow, roomId]);
+
   // Start the room name field with the account's chosen name, but not an auto-generated guest one
   useEffect(() => {
     if (user && !playerName && !isDefaultGuestName(user.name)) setPlayerName(user.name);
@@ -388,6 +402,8 @@ export default function JodaMemory() {
         setRoundWinner(null);
         setRoundTied(false);
         setPlayerLeftNotice(null);
+        setGamePaused(false);
+        setPauseOwner(null);
         // Every deal from the host after the first one is a new round
         roundsDealtRef.current += 1;
         setCurrentRound(roundsDealtRef.current);
@@ -442,12 +458,13 @@ export default function JodaMemory() {
           return;
         }
         setWaitingForName(null);
-        setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit) });
+        setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
         if (data.gameInProgress) {
           // The server abandons the game and puts the room back in the lobby; mirror that here
           setGameStarted(false);
           setGameWon(false);
           setGamePaused(false);
+          setPauseOwner(null);
           setIsInLobby(true);
           setIsReady(false);
           setRoundWinner(null);
@@ -476,8 +493,9 @@ export default function JodaMemory() {
       });
 
       // Listen for pause state changes
-      socket.on('gamePaused', (data: { paused: boolean; pausedBy: string }) => {
+      socket.on('gamePaused', (data: { paused: boolean; pausedBy: string; pausedById?: string; pausedByName?: string }) => {
         setGamePaused(data.paused);
+        setPauseOwner(data.paused && data.pausedById ? { id: data.pausedById, name: data.pausedByName || 'Your friend' } : null);
       });
 
       // Listen for chat messages
@@ -485,46 +503,39 @@ export default function JodaMemory() {
         setChatMessages(prev => [...prev, data]);
       });
 
-      // Phones drop the socket when the app is backgrounded; the server holds our seat for a while,
-      // so on every reconnect we take it back and resync the board from the server's copy
-      socket.on('connect', () => {
+      // Phones drop the socket when the app is backgrounded, and people reload or reopen the link; the server
+      // holds our seat for a while, so on every connect we try to take it back and resync from the server's copy
+      const attemptRejoin = () => {
         const { roomId: currentRoomId, inRoom } = rejoinRef.current;
-        if (!currentRoomId || !inRoom) return;
+        if (!currentRoomId) return;
         socket.emit('rejoinRoom', { roomId: currentRoomId, playerKey: getPlayerKey() }, (response: RejoinResponse) => {
-          if (!response?.success) {
-            // The seat expired: drop back to the name step with an explanation instead of a dead lobby
-            setGameStarted(false);
-            setIsInLobby(false);
-            setRoomId(null);
-            setLobbyPlayers([]);
-            setIsHost(false);
-            setIsReady(false);
-            setWaitingForName(null);
-            const url = new URL(window.location.href);
-            url.searchParams.delete('roomId');
-            window.history.replaceState({}, '', url.toString());
-            setConnectionError('Room not found');
+          if (response?.success) {
+            applyReclaimedSeat(response, socket.id);
             return;
           }
-          setConnectionError(null);
-          setLobbyPlayers(response.room.players);
-          const seat = response.room.players.findIndex(p => p.socketId === socket.id);
-          if (seat >= 0) setMyPlayerIndex(seat);
-          const game = response.game;
-          if (game) {
-            const matched = new Set(game.matched);
-            // A card can be face-up mid-turn; keep it so the next flip completes the same pair as on the server
-            const flipped = new Set(game.flipped ?? []);
-            setCards(prev => prev.map((c, i) => ({ ...c, isFlipped: flipped.has(i), isMatched: matched.has(i) })));
-            setFlippedCards(game.flipped ?? []);
-            setCurrentPlayerIndex(game.currentPlayerIndex);
-            setPlayers(prev => prev.map((p, i) => ({ ...p, score: game.pairs[i] ?? p.score })));
-            setRoundWins(game.roundWins);
-            setCurrentRound(game.currentRound);
-            roundsDealtRef.current = game.currentRound;
+          // Opening a link we have no seat in: stay on the join step (and forget a room that no longer exists)
+          if (!inRoom) {
+            if (response && !response.success && /not found/i.test(response.error ?? '')) clearCurrentRoom();
+            return;
           }
+          clearCurrentRoom();
+          // The seat expired: drop back to the name step with an explanation instead of a dead lobby
+          setGameStarted(false);
+          setIsInLobby(false);
+          setRoomId(null);
+          setLobbyPlayers([]);
+          setIsHost(false);
+          setIsReady(false);
+          setWaitingForName(null);
+          const url = new URL(window.location.href);
+          url.searchParams.delete('roomId');
+          window.history.replaceState({}, '', url.toString());
+          setConnectionError('Room not found');
         });
-      });
+      };
+      socket.on('connect', attemptRejoin);
+      // Coming back from another page within the site: the socket never dropped, so there is no 'connect' event
+      if (socket.connected && !rejoinRef.current.inRoom) attemptRejoin();
 
       socket.on('playerDisconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
         if (data.playerId === socket.id) return;
@@ -784,7 +795,7 @@ export default function JodaMemory() {
   applyFlipRef.current = applyFlip;
   rejoinRef.current = { roomId, inRoom: gameMode === 'multiplayer' && (isInLobby || gameStarted) };
 
-  // Solo times go to the leaderboard; the server needs a session (guest or account) to save them
+  // Solo times are personal bests on the player's profile; the server needs a session (guest or account) to save them
   const saveSoloRun = async (timeSeconds: number, finalMoves: number) => {
     setSoloSave({ status: 'saving' });
     try {
@@ -823,7 +834,9 @@ export default function JodaMemory() {
     }
   };
 
+  // Leaving for real: give up the seat (mid-game that's a forfeit) and forget the room
   const handleBackToMenu = () => {
+    clearCurrentRoom();
     // Leave room if in one
     if (socketRef.current && roomId) {
       socketRef.current.emit('leaveRoom', { roomId });
@@ -871,9 +884,20 @@ export default function JodaMemory() {
     setPlayerLeftNotice(null);
     setWaitingForName(null);
     setSoloSave(null);
+    setGamePaused(false);
+    setPauseOwner(null);
   };
 
   const handleBackToMode = () => {
+    if (gameMode === 'multiplayer' && roomId && (isInLobby || gameStarted)) {
+      // Stepping out, not leaving: the server holds the seat and the header offers "Return to room"
+      // (drop roomId from the address first: the header hides the reminder while the address points at the room)
+      const url = new URL(window.location.href);
+      url.searchParams.delete('roomId');
+      window.history.replaceState({}, '', url.toString());
+      setRoomId(null);
+      saveCurrentRoom(roomId);
+    }
     setGameMode(null);
     setGameStarted(false);
     setIsInLobby(false);
@@ -914,6 +938,64 @@ export default function JodaMemory() {
       return;
     }
     handleStartGame(difficulty);
+  };
+
+  // Put this client back into its seat from a rejoin/join answer: lobby, or the running game rebuilt from the server's board
+  const applyReclaimedSeat = (response: Extract<RejoinResponse, { success: true }>, socketId: string | undefined) => {
+    const { room, game } = response;
+    setConnectionError(null);
+    setCodeError(null);
+    setGameMode('multiplayer');
+    setRoomId(room.id);
+    setLobbyPlayers(room.players);
+    setShowOpponentMoves(room.showOpponentMoves);
+    const seat = room.players.findIndex(p => p.socketId === socketId);
+    if (seat >= 0) {
+      setMyPlayerIndex(seat);
+      setIsHost(Boolean(room.players[seat]?.isHost));
+      setIsReady(Boolean(room.players[seat]?.isReady));
+    }
+    if (!game) {
+      setGameStarted(false);
+      setIsInLobby(true);
+      return;
+    }
+    const matched = new Set(game.matched);
+    // A card can be face-up mid-turn; keep it so the next flip completes the same pair as on the server
+    const flipped = new Set(game.flipped ?? []);
+    setCards(game.cards.map((card, index) => {
+      const imageData = IMAGE_POOL.find(img => img.name === card.iconName);
+      return {
+        id: index,
+        iconName: card.iconName,
+        Icon: imageData?.Icon || Gamepad2,
+        imageUrl: imageData?.imageUrl,
+        color: imageData?.color || 'from-slate-400 to-gray-600',
+        isFlipped: flipped.has(index),
+        isMatched: matched.has(index),
+      };
+    }));
+    setDifficulty(game.cards.length >= 24 ? 'hard' : game.cards.length >= 16 ? 'medium' : 'easy');
+    setFlippedCards(game.flipped ?? []);
+    setCurrentPlayerIndex(game.currentPlayerIndex);
+    setPlayers(room.players.map((p, i) => ({ ...p, score: game.pairs[i] ?? 0 })));
+    setRoundWins(game.roundWins);
+    setCurrentRound(game.currentRound);
+    roundsDealtRef.current = game.currentRound;
+    setGamePaused(Boolean(room.pausedById));
+    setPauseOwner(room.pausedById ? { id: room.pausedById, name: room.pausedByName || 'Your friend' } : null);
+    setGameWon(false);
+    setIsInLobby(false);
+    setGameStarted(true);
+  };
+
+  // In multiplayer the server decides (only whoever paused may resume) and its gamePaused broadcast updates both screens
+  const requestPause = (paused: boolean) => {
+    if (gameMode === 'multiplayer') {
+      if (socketRef.current && roomId) socketRef.current.emit('togglePause', { roomId, paused });
+      return;
+    }
+    setGamePaused(paused);
   };
 
   // The name typed for a room becomes the account's display name, which is what leaderboards show
@@ -971,6 +1053,13 @@ export default function JodaMemory() {
     try {
       const socket = socketRef.current;
       socket.emit('joinGame', { roomId: targetRoom, playerName: playerName.trim(), playerKey: getPlayerKey() }, (response: any) => {
+        if (response.success && response.rejoined) {
+          applyReclaimedSeat(response, socket.id);
+          const url = new URL(window.location.href);
+          url.searchParams.set('roomId', response.room.id);
+          window.history.replaceState({}, '', url.toString());
+          return;
+        }
         if (response.success) {
           if (code) {
             setRoomId(response.room?.id ?? code);
@@ -1337,11 +1426,13 @@ export default function JodaMemory() {
                   <div className="flex items-center gap-2">
                     <X className="h-5 w-5 text-signal" aria-hidden="true" />
                     <h3 className="font-display text-lg font-bold">
-                      {connectionError.includes('full') || connectionError.includes('expired') ? 'This room is full or has expired' : "Couldn't join the room"}
+                      {/full/i.test(connectionError) ? 'This room is full' : "Couldn't join the room"}
                     </h3>
                   </div>
                   <p className="mt-1 text-chalk">
-                    {/not found/i.test(connectionError)
+                    {/full/i.test(connectionError)
+                      ? 'Two players are already in this room. Ask your friend to create a new room and send you the new link.'
+                      : /not found/i.test(connectionError)
                       ? roomId
                         ? 'This room has closed. Ask your friend to create a new room and send you the new link.'
                         : 'Your room closed while you were away. Create a new room and send the new link.'
@@ -1475,7 +1566,9 @@ export default function JodaMemory() {
                     </p>
                     <p className="mt-1 text-sm text-chalk">
                       {playerLeftNotice.forfeit
+                        ? playerLeftNotice.reachedRound >= 4
                         ? 'You win by forfeit, and it counts on the leaderboard. Send the link again to play with someone new.'
+                        : "You win by forfeit. It's in your match history, but games only count on the leaderboard once they reach round 4."
                         : playerLeftNotice.duringGame
                         ? 'The game ended before anyone flipped a card, so nothing was saved. Send the link again to play with someone new.'
                         : 'Send the link again to play with someone new.'}
@@ -1710,25 +1803,23 @@ export default function JodaMemory() {
                 <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-felt-deep/90 p-4">
                   <div className="panel max-w-xs p-6 text-center shadow-lift">
                     <Pause className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
-                    <h3 className="title-md mt-3">Game paused</h3>
-                    <p className="mt-1 text-chalk">The timer is stopped. Resume when you&apos;re ready.</p>
-                    <button
-                      onClick={() => {
-                        setGamePaused(false);
-
-                        // Sync resume in multiplayer
-                        if (gameMode === 'multiplayer' && socketRef.current && roomId) {
-                          socketRef.current.emit('togglePause', {
-                            roomId,
-                            paused: false
-                          });
-                        }
-                      }}
-                      className="btn-gold mt-5 w-full"
-                    >
-                      <Play className="h-4 w-4" aria-hidden="true" />
-                      Resume game
-                    </button>
+                    {canResume ? (
+                      <>
+                        <h3 className="title-md mt-3">Game paused</h3>
+                        <p className="mt-1 text-chalk">The timer is stopped. Resume when you&apos;re ready.</p>
+                        <button onClick={() => requestPause(false)} className="btn-gold mt-5 w-full" autoFocus>
+                          <Play className="h-4 w-4" aria-hidden="true" />
+                          Resume game
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="title-md mt-3">{pauseOwner?.name ?? 'Your friend'} paused the game</h3>
+                        <p className="mt-1 text-chalk">
+                          The timer is stopped. Only {pauseOwner?.name ?? 'they'} can resume it.
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -1833,22 +1924,12 @@ export default function JodaMemory() {
             <div className="mx-auto mt-5 flex max-w-3xl flex-wrap items-center gap-2">
               {gameStarted && !gameWon && (
                 <button
-                  onClick={() => {
-                    const newPausedState = !gamePaused;
-                    setGamePaused(newPausedState);
-
-                    // Sync pause state in multiplayer
-                    if (gameMode === 'multiplayer' && socketRef.current && roomId) {
-                      socketRef.current.emit('togglePause', {
-                        roomId,
-                        paused: newPausedState
-                      });
-                    }
-                  }}
+                  onClick={() => requestPause(!gamePaused)}
+                  disabled={gamePaused && !canResume}
                   className="btn-quiet btn-sm min-h-11"
                 >
                   {gamePaused ? <Play className="h-4 w-4" aria-hidden="true" /> : <Pause className="h-4 w-4" aria-hidden="true" />}
-                  {gamePaused ? 'Resume' : 'Pause'}
+                  {gamePaused ? (canResume ? 'Resume' : `Paused by ${pauseOwner?.name ?? 'your friend'}`) : 'Pause'}
                 </button>
               )}
               {/* In multiplayer new cards only come from "Next round"; the server rejects mid-round deals */}
@@ -2091,19 +2172,16 @@ function SoloSaveStatus({
   difficulty: Difficulty;
 }) {
   if (!save) return null;
-  const board = `/leaderboard?tab=solo&difficulty=${difficulty}`;
   return (
     <div className="mt-4 rounded-xl bg-felt-deep/60 p-3 text-sm" aria-live="polite">
       {save.status === 'saving' && <p className="text-chalk">Saving your time…</p>}
       {save.status === 'saved' && (
         <p className="text-chalk">
           {save.personalBest
-            ? save.rank
-              ? `New personal best. You're number ${save.rank} on the ${DIFFICULTY_LABEL[difficulty]} board.`
-              : 'New personal best, saved to the leaderboard.'
-            : 'Saved. Your best time on the leaderboard is still faster.'}{' '}
-          <Link href={board} className="font-semibold text-gold underline-offset-2 hover:underline">
-            See the leaderboard
+            ? `New personal best on ${DIFFICULTY_LABEL[difficulty]}, saved to your profile.`
+            : 'Saved to your profile. Your best time on this level is still faster.'}{' '}
+          <Link href="/profile" className="font-semibold text-gold underline-offset-2 hover:underline">
+            See your profile
           </Link>
         </p>
       )}
@@ -2114,7 +2192,7 @@ function SoloSaveStatus({
           <Link href="/login" className="font-semibold text-gold underline-offset-2 hover:underline">
             Sign in or play as a guest
           </Link>{' '}
-          to get on the leaderboard.
+          to keep your best times on your profile.
         </p>
       )}
       {save.status === 'error' && (
@@ -2128,7 +2206,15 @@ type RejoinResponse =
   | { success: false; error?: string }
   | {
       success: true;
-      room: { id: string; players: LobbyPlayer[]; difficulty: Difficulty; showOpponentMoves: boolean; gameStarted: boolean };
+      room: {
+        id: string;
+        players: LobbyPlayer[];
+        difficulty: Difficulty;
+        showOpponentMoves: boolean;
+        gameStarted: boolean;
+        pausedById?: string | null;
+        pausedByName?: string | null;
+      };
       game: null | {
         cards: { iconName: string }[];
         matched: number[];
@@ -2170,14 +2256,14 @@ function isDefaultGuestName(name: string | null | undefined): boolean {
   return !name || /^Guest [0-9a-f]{8}$/i.test(name);
 }
 
-// Lets a guest with an auto-generated name put a real name on the leaderboard right after a win
+// Lets a guest with an auto-generated name choose the name other players see, right after a win
 function LeaderboardNameForm() {
   const { user, refreshSession } = useAuth();
   const [name, setName] = useState('');
   const [state, setState] = useState<{ status: 'idle' | 'saving' | 'saved' } | { status: 'error'; message: string }>({ status: 'idle' });
   if (!user || (!isDefaultGuestName(user.name) && state.status !== 'saved')) return null;
   if (state.status === 'saved') {
-    return <p className="mt-2 text-chalk" aria-live="polite">Saved. The leaderboard now shows {user.name}.</p>;
+    return <p className="mt-2 text-chalk" aria-live="polite">Saved. Other players now see you as {user.name}.</p>;
   }
 
   const save = async (e: React.FormEvent) => {
@@ -2205,7 +2291,7 @@ function LeaderboardNameForm() {
   return (
     <form onSubmit={save} className="mt-3 border-t border-white/10 pt-3">
       <label htmlFor="leaderboard-name" className="field-label">
-        Add your name to the leaderboard
+        Choose the name other players see
       </label>
       <div className="flex gap-2">
         <input
