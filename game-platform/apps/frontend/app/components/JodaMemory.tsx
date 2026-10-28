@@ -8,6 +8,7 @@ import SoundControls from './SoundControls';
 import SiteHeader from './ui/SiteHeader';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
+import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -16,7 +17,7 @@ import {
   ArrowLeft, Volume2, Brain, X, Eye, EyeOff, Copy, Check, Link2,
   Pause, Play, Home, LogOut, MessageSquare, Send, Gem, Flame,
   Cherry, Cpu, Puzzle, Sword, Wand2, Smile, Ghost, Coffee,
-  Cake, PartyPopper, Gift, Sparkle, User
+  Cake, PartyPopper, Gift, Sparkle, User, Globe, Swords
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
@@ -184,6 +185,12 @@ export default function JodaMemory() {
   // Name of the player who just left, and whether that ended a game in progress
   const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean; reachedRound: number } | null>(null);
   const { user, refreshSession } = useAuth();
+  // Online lobby: browse players who aren't in a room and send/receive game requests
+  const [showOnline, setShowOnline] = useState(false);
+  const [onlineCount, setOnlineCount] = useState(0);
+  const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; expiresAt: number } | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteNow, setInviteNow] = useState(() => Date.now());
   const [codeInput, setCodeInput] = useState('');
   const [codeError, setCodeError] = useState<string | null>(null);
   // Name of the other player while their connection is down and the server is holding their seat
@@ -322,6 +329,27 @@ export default function JodaMemory() {
     return () => clearInterval(refresh);
   }, [inRoomNow, roomId]);
 
+  // Being listed as online: whenever this page is open and we're not in a room (debounced while typing a name)
+  const onlineName = (playerName.trim() || (user && !isDefaultGuestName(user.name) ? user.name : '') || user?.name || '').slice(0, 20);
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+    const send = () => socket.emit('presence:update', { available: !inRoomNow, name: onlineName || undefined, playerKey: getPlayerKey() }, () => {});
+    const timer = setTimeout(() => { if (socket.connected) send(); }, 400);
+    socket.on('connect', send);
+    return () => {
+      clearTimeout(timer);
+      socket.off('connect', send);
+    };
+  }, [inRoomNow, onlineName, gameMode]);
+
+  // Countdown on an incoming request
+  useEffect(() => {
+    if (!incomingInvite) return;
+    const timer = setInterval(() => setInviteNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [incomingInvite]);
+
   // Start the room name field with the account's chosen name, but not an auto-generated guest one
   useEffect(() => {
     if (user && !playerName && !isDefaultGuestName(user.name)) setPlayerName(user.name);
@@ -352,234 +380,244 @@ export default function JodaMemory() {
     };
   }, [gameStarted, gameWon, gamePaused]);
 
-  // WebSocket connection for multiplayer
+  // One socket for the whole Joda Memory page: rooms, and being listed as online when not in a room
   useEffect(() => {
-    if (gameMode === 'multiplayer') {
-      socketRef.current = connectSocket();
-      const socket = socketRef.current;
+    socketRef.current = connectSocket();
+    const socket = socketRef.current;
 
-      // Listen for player joined
-      socket.on('playerJoined', (data: { player: LobbyPlayer; players: LobbyPlayer[] }) => {
-        setLobbyPlayers(data.players);
-        setPlayerLeftNotice(null);
-        if (soundInitialized) {
-          getSoundManager().play('match');
-        }
+    // Listen for player joined
+    socket.on('playerJoined', (data: { player: LobbyPlayer; players: LobbyPlayer[] }) => {
+      setLobbyPlayers(data.players);
+      setPlayerLeftNotice(null);
+      if (soundInitialized) {
+        getSoundManager().play('match');
+      }
+    });
+
+    // Listen for player ready updates
+    socket.on('playerReadyUpdate', (data: { playerId: string; players: LobbyPlayer[] }) => {
+      setLobbyPlayers(data.players);
+    });
+
+    // Listen for all players ready
+    socket.on('allPlayersReady', (data: { message: string }) => {
+      console.log(data.message);
+    });
+
+    // Listen for game started
+    socket.on('gameStarted', (data: { cards: any[]; currentPlayerIndex: number; players: Player[]; difficulty?: Difficulty }) => {
+      // Both players lay out the board for the deck the server dealt (24 cards needs the wider grid)
+      if (data.difficulty) setDifficulty(data.difficulty);
+      const mappedCards: Card[] = data.cards.map((card: any, index: number) => {
+        const imageData = IMAGE_POOL.find(img => img.name === card.iconName);
+        return {
+          id: index,
+          iconName: card.iconName,
+          Icon: imageData?.Icon || Gamepad2,
+          imageUrl: imageData?.imageUrl,
+          color: imageData?.color || 'from-slate-400 to-gray-600',
+          isFlipped: false,
+          isMatched: false,
+        };
       });
 
-      // Listen for player ready updates
-      socket.on('playerReadyUpdate', (data: { playerId: string; players: LobbyPlayer[] }) => {
-        setLobbyPlayers(data.players);
-      });
+      setCards(mappedCards);
+      setPlayers(data.players);
+      setMyPlayerIndex(Math.max(0, data.players.findIndex(p => p.socketId === socket.id)));
+      setCurrentPlayerIndex(data.currentPlayerIndex);
+      setFlippedCards([]);
+      setRoundWinner(null);
+      setRoundTied(false);
+      setPlayerLeftNotice(null);
+      setGamePaused(false);
+      setPauseOwner(null);
+      // Every deal from the host after the first one is a new round
+      roundsDealtRef.current += 1;
+      setCurrentRound(roundsDealtRef.current);
+      setGameStarted(true);
+      setIsInLobby(false);
+      setTimer(0);
+      setMoves(0);
+      setGameWon(false);
 
-      // Listen for all players ready
-      socket.on('allPlayersReady', (data: { message: string }) => {
-        console.log(data.message);
-      });
+      if (soundInitialized) {
+        getSoundManager().play('myTurn');
+      }
+    });
 
-      // Listen for game started
-      socket.on('gameStarted', (data: { cards: any[]; currentPlayerIndex: number; players: Player[]; difficulty?: Difficulty }) => {
-        // Both players lay out the board for the deck the server dealt (24 cards needs the wider grid)
-        if (data.difficulty) setDifficulty(data.difficulty);
-        const mappedCards: Card[] = data.cards.map((card: any, index: number) => {
-          const imageData = IMAGE_POOL.find(img => img.name === card.iconName);
-          return {
-            id: index,
-            iconName: card.iconName,
-            Icon: imageData?.Icon || Gamepad2,
-            imageUrl: imageData?.imageUrl,
-            color: imageData?.color || 'from-slate-400 to-gray-600',
-            isFlipped: false,
-            isMatched: false,
-          };
-        });
+    // Listen for card flipped
+    // The server relays every flip to the whole room, including the player who flipped,
+    // so both boards apply the same flips in the same order and stay identical
+    socket.on('cardFlipped', (data: { cardId: number; playerId: string }) => {
+      applyFlipRef.current(data.cardId);
+    });
 
-        setCards(mappedCards);
-        setPlayers(data.players);
-        setMyPlayerIndex(Math.max(0, data.players.findIndex(p => p.socketId === socket.id)));
-        setCurrentPlayerIndex(data.currentPlayerIndex);
-        setFlippedCards([]);
-        setRoundWinner(null);
-        setRoundTied(false);
-        setPlayerLeftNotice(null);
+    // Listen for match found
+    socket.on('matchFound', (data: { cardIds: number[]; playerId: string; players: Player[] }) => {
+      setPlayers(data.players);
+      if (soundInitialized) {
+        getSoundManager().play('match');
+      }
+    });
+
+    // Listen for no match
+    socket.on('noMatch', (data: { cardIds: number[]; currentPlayerIndex: number }) => {
+      setCurrentPlayerIndex(data.currentPlayerIndex);
+      if (soundInitialized) {
+        getSoundManager().play('turnChange');
+      }
+    });
+
+    // Listen for game won
+    socket.on('gameWon', (data: { players: Player[] }) => {
+      setPlayers(data.players);
+      setGameWon(true);
+      if (soundInitialized) {
+        getSoundManager().play('win');
+      }
+    });
+
+    // Listen for player left
+    socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean; forfeit?: boolean }) => {
+      setLobbyPlayers(data.players);
+      if (data.players.length === 0) {
+        handleBackToMenu();
+        return;
+      }
+      setWaitingForName(null);
+      setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
+      if (data.gameInProgress) {
+        // The server abandons the game and puts the room back in the lobby; mirror that here
+        setGameStarted(false);
+        setGameWon(false);
         setGamePaused(false);
         setPauseOwner(null);
-        // Every deal from the host after the first one is a new round
-        roundsDealtRef.current += 1;
-        setCurrentRound(roundsDealtRef.current);
-        setGameStarted(true);
-        setIsInLobby(false);
-        setTimer(0);
-        setMoves(0);
-        setGameWon(false);
+        setIsInLobby(true);
+        setIsReady(false);
+        setRoundWinner(null);
+        setOverallWinner(null);
+        setRoundTied(false);
+        setRoundWins([0, 0]);
+        setCurrentRound(1);
+        roundsDealtRef.current = 0;
+        setCards([]);
+        setFlippedCards([]);
+      }
+    });
 
-        if (soundInitialized) {
-          getSoundManager().play('myTurn');
-        }
-      });
+    // Listen for new host assignment
+    socket.on('newHost', (data: { hostId: string; players: LobbyPlayer[] }) => {
+      setLobbyPlayers(data.players);
+      // Update isHost if this client became the new host
+      if (data.hostId === socket.id) {
+        setIsHost(true);
+      }
+    });
 
-      // Listen for card flipped
-      // The server relays every flip to the whole room, including the player who flipped,
-      // so both boards apply the same flips in the same order and stay identical
-      socket.on('cardFlipped', (data: { cardId: number; playerId: string }) => {
-        applyFlipRef.current(data.cardId);
-      });
+    // Listen for visibility setting changes
+    socket.on('visibilityChanged', (data: { showOpponentMoves: boolean }) => {
+      setShowOpponentMoves(data.showOpponentMoves);
+    });
 
-      // Listen for match found
-      socket.on('matchFound', (data: { cardIds: number[]; playerId: string; players: Player[] }) => {
-        setPlayers(data.players);
-        if (soundInitialized) {
-          getSoundManager().play('match');
-        }
-      });
+    // Listen for pause state changes
+    socket.on('gamePaused', (data: { paused: boolean; pausedBy: string; pausedById?: string; pausedByName?: string }) => {
+      setGamePaused(data.paused);
+      setPauseOwner(data.paused && data.pausedById ? { id: data.pausedById, name: data.pausedByName || 'Your friend' } : null);
+    });
 
-      // Listen for no match
-      socket.on('noMatch', (data: { cardIds: number[]; currentPlayerIndex: number }) => {
-        setCurrentPlayerIndex(data.currentPlayerIndex);
-        if (soundInitialized) {
-          getSoundManager().play('turnChange');
-        }
-      });
+    // Listen for chat messages
+    socket.on('chatMessage', (data: { playerName: string; playerId: string; message: string; timestamp: string }) => {
+      setChatMessages(prev => [...prev, data]);
+    });
 
-      // Listen for game won
-      socket.on('gameWon', (data: { players: Player[] }) => {
-        setPlayers(data.players);
-        setGameWon(true);
-        if (soundInitialized) {
-          getSoundManager().play('win');
-        }
-      });
-
-      // Listen for player left
-      socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean; forfeit?: boolean }) => {
-        setLobbyPlayers(data.players);
-        if (data.players.length === 0) {
-          handleBackToMenu();
+    // Phones drop the socket when the app is backgrounded, and people reload or reopen the link; the server
+    // holds our seat for a while, so on every connect we try to take it back and resync from the server's copy
+    const attemptRejoin = () => {
+      const { roomId: currentRoomId, inRoom } = rejoinRef.current;
+      if (!currentRoomId) return;
+      socket.emit('rejoinRoom', { roomId: currentRoomId, playerKey: getPlayerKey() }, (response: RejoinResponse) => {
+        if (response?.success) {
+          applyReclaimedSeat(response, socket.id);
           return;
         }
-        setWaitingForName(null);
-        setPlayerLeftNotice({ name: data.playerName || 'Your friend', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
-        if (data.gameInProgress) {
-          // The server abandons the game and puts the room back in the lobby; mirror that here
-          setGameStarted(false);
-          setGameWon(false);
-          setGamePaused(false);
-          setPauseOwner(null);
-          setIsInLobby(true);
-          setIsReady(false);
-          setRoundWinner(null);
-          setOverallWinner(null);
-          setRoundTied(false);
-          setRoundWins([0, 0]);
-          setCurrentRound(1);
-          roundsDealtRef.current = 0;
-          setCards([]);
-          setFlippedCards([]);
+        // Opening a link we have no seat in: stay on the join step (and forget a room that no longer exists)
+        if (!inRoom) {
+          if (response && !response.success && /not found/i.test(response.error ?? '')) clearCurrentRoom();
+          return;
         }
-      });
-
-      // Listen for new host assignment
-      socket.on('newHost', (data: { hostId: string; players: LobbyPlayer[] }) => {
-        setLobbyPlayers(data.players);
-        // Update isHost if this client became the new host
-        if (data.hostId === socket.id) {
-          setIsHost(true);
-        }
-      });
-
-      // Listen for visibility setting changes
-      socket.on('visibilityChanged', (data: { showOpponentMoves: boolean }) => {
-        setShowOpponentMoves(data.showOpponentMoves);
-      });
-
-      // Listen for pause state changes
-      socket.on('gamePaused', (data: { paused: boolean; pausedBy: string; pausedById?: string; pausedByName?: string }) => {
-        setGamePaused(data.paused);
-        setPauseOwner(data.paused && data.pausedById ? { id: data.pausedById, name: data.pausedByName || 'Your friend' } : null);
-      });
-
-      // Listen for chat messages
-      socket.on('chatMessage', (data: { playerName: string; playerId: string; message: string; timestamp: string }) => {
-        setChatMessages(prev => [...prev, data]);
-      });
-
-      // Phones drop the socket when the app is backgrounded, and people reload or reopen the link; the server
-      // holds our seat for a while, so on every connect we try to take it back and resync from the server's copy
-      const attemptRejoin = () => {
-        const { roomId: currentRoomId, inRoom } = rejoinRef.current;
-        if (!currentRoomId) return;
-        socket.emit('rejoinRoom', { roomId: currentRoomId, playerKey: getPlayerKey() }, (response: RejoinResponse) => {
-          if (response?.success) {
-            applyReclaimedSeat(response, socket.id);
-            return;
-          }
-          // Opening a link we have no seat in: stay on the join step (and forget a room that no longer exists)
-          if (!inRoom) {
-            if (response && !response.success && /not found/i.test(response.error ?? '')) clearCurrentRoom();
-            return;
-          }
-          clearCurrentRoom();
-          // The seat expired: drop back to the name step with an explanation instead of a dead lobby
-          setGameStarted(false);
-          setIsInLobby(false);
-          setRoomId(null);
-          setLobbyPlayers([]);
-          setIsHost(false);
-          setIsReady(false);
-          setWaitingForName(null);
-          const url = new URL(window.location.href);
-          url.searchParams.delete('roomId');
-          window.history.replaceState({}, '', url.toString());
-          setConnectionError('Room not found');
-        });
-      };
-      socket.on('connect', attemptRejoin);
-      // Coming back from another page within the site: the socket never dropped, so there is no 'connect' event
-      if (socket.connected && !rejoinRef.current.inRoom) attemptRejoin();
-
-      socket.on('playerDisconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
-        if (data.playerId === socket.id) return;
-        setWaitingForName(data.playerName || 'Your friend');
-      });
-
-      socket.on('playerReconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
-        setLobbyPlayers(data.players);
+        clearCurrentRoom();
+        // The seat expired: drop back to the name step with an explanation instead of a dead lobby
+        setGameStarted(false);
+        setIsInLobby(false);
+        setRoomId(null);
+        setLobbyPlayers([]);
+        setIsHost(false);
+        setIsReady(false);
         setWaitingForName(null);
+        const url = new URL(window.location.href);
+        url.searchParams.delete('roomId');
+        window.history.replaceState({}, '', url.toString());
+        setConnectionError('Room not found');
       });
+    };
+    socket.on('connect', attemptRejoin);
+    // Coming back from another page within the site: the socket never dropped, so there is no 'connect' event
+    if (socket.connected && !rejoinRef.current.inRoom) attemptRejoin();
 
-      // Connection error handler
-      socket.on('connect_error', (error) => {
-        setConnectionError('Failed to connect to game server');
-        console.error('Socket connection error:', error);
-      });
+    socket.on('presence:changed', (data: { count: number }) => setOnlineCount(data?.count ?? 0));
+    socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; expiresAt: number }) => {
+      setInviteError(null);
+      setInviteNow(Date.now());
+      setIncomingInvite({ inviteId: data.inviteId, fromName: data.from?.name || 'A player', expiresAt: data.expiresAt });
+    });
+    const dropInvite = (data: { inviteId: string }) =>
+      setIncomingInvite(current => (current && current.inviteId === data.inviteId ? null : current));
+    socket.on('invite:cancelled', dropInvite);
+    socket.on('invite:expired', dropInvite);
 
-      return () => {
-        socket.off('playerJoined');
-        socket.off('playerReadyUpdate');
-        socket.off('allPlayersReady');
-        socket.off('gameStarted');
-        socket.off('cardFlipped');
-        socket.off('matchFound');
-        socket.off('noMatch');
-        socket.off('gameWon');
-        socket.off('playerLeft');
-        socket.off('newHost');
-        socket.off('visibilityChanged');
-        socket.off('gamePaused');
-        socket.off('chatMessage');
-        socket.off('connect');
-        socket.off('playerDisconnected');
-        socket.off('playerReconnected');
-        socket.off('connect_error');
-      };
-    } else {
-      // Disconnect socket if not in multiplayer mode
-      if (socketRef.current) {
-        disconnectSocket();
-        socketRef.current = null;
-      }
-    }
+    socket.on('playerDisconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
+      if (data.playerId === socket.id) return;
+      setWaitingForName(data.playerName || 'Your friend');
+    });
+
+    socket.on('playerReconnected', (data: { playerId: string; playerName?: string; players: LobbyPlayer[] }) => {
+      setLobbyPlayers(data.players);
+      setWaitingForName(null);
+    });
+
+    // Connection error handler
+    socket.on('connect_error', (error) => {
+      setConnectionError('Failed to connect to game server');
+      console.error('Socket connection error:', error);
+    });
+
+    return () => {
+      socket.off('playerJoined');
+      socket.off('playerReadyUpdate');
+      socket.off('allPlayersReady');
+      socket.off('gameStarted');
+      socket.off('cardFlipped');
+      socket.off('matchFound');
+      socket.off('noMatch');
+      socket.off('gameWon');
+      socket.off('playerLeft');
+      socket.off('newHost');
+      socket.off('visibilityChanged');
+      socket.off('gamePaused');
+      socket.off('chatMessage');
+      socket.off('connect', attemptRejoin);
+      socket.off('presence:changed');
+      socket.off('invite:received');
+      socket.off('invite:cancelled', dropInvite);
+      socket.off('invite:expired', dropInvite);
+      socket.off('playerDisconnected');
+      socket.off('playerReconnected');
+      socket.off('connect_error');
+    };
   }, [gameMode, soundInitialized, difficulty]);
+
+  // Leaving the Joda Memory page ends presence and lets any seat go into its grace period
+  useEffect(() => () => disconnectSocket(), []);
 
   // Check for room ID in URL params and auto-join
   useEffect(() => {
@@ -843,9 +881,10 @@ export default function JodaMemory() {
     }
 
     // Disconnect socket if connected
+    // A fresh connection stops this room's events but keeps us listed as online
     if (socketRef.current) {
       disconnectSocket();
-      socketRef.current = null;
+      socketRef.current = connectSocket();
     }
 
     // Clear URL parameters
@@ -897,6 +936,8 @@ export default function JodaMemory() {
       window.history.replaceState({}, '', url.toString());
       setRoomId(null);
       saveCurrentRoom(roomId);
+      disconnectSocket();
+      socketRef.current = connectSocket();
     }
     setGameMode(null);
     setGameStarted(false);
@@ -996,6 +1037,41 @@ export default function JodaMemory() {
       return;
     }
     setGamePaused(paused);
+  };
+
+  // A request was accepted: drop whatever we were doing (menu, solo game) and sit down in the new room's lobby
+  const enterInviteRoom = (room: InviteRoom) => {
+    setShowOnline(false);
+    setIncomingInvite(null);
+    setGameWon(false);
+    setCards([]);
+    setFlippedCards([]);
+    setMoves(0);
+    setTimer(0);
+    applyReclaimedSeat({ success: true, room, game: null } as Extract<RejoinResponse, { success: true }>, socketRef.current?.id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('roomId', room.id);
+    window.history.pushState({}, '', url.toString());
+    if (onlineName) saveDisplayName(onlineName);
+    if (soundInitialized) getSoundManager().play('myTurn');
+  };
+
+  const answerInvite = (accept: boolean) => {
+    const socket = socketRef.current;
+    if (!socket || !incomingInvite) return;
+    const { inviteId } = incomingInvite;
+    socket.emit('invite:respond', { inviteId, accept, playerKey: getPlayerKey() }, (res: { success: boolean; room?: InviteRoom; error?: string }) => {
+      if (!accept) {
+        setIncomingInvite(null);
+        return;
+      }
+      if (res?.success && res.room) {
+        enterInviteRoom(res.room);
+      } else {
+        setIncomingInvite(null);
+        setInviteError(res?.error === 'Request expired' ? 'That request expired before you answered.' : 'That player is no longer available.');
+      }
+    });
   };
 
   // The name typed for a room becomes the account's display name, which is what leaderboards show
@@ -1271,6 +1347,31 @@ export default function JodaMemory() {
           </section>
         )}
 
+        {/* Incoming game request: pops up anywhere on this page while we're not in a room */}
+        {incomingInvite && !inRoomNow && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-felt-deep/80 p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="invite-title" className="panel w-full max-w-sm p-6 shadow-lift">
+              <Swords className="h-8 w-8 text-gold" aria-hidden="true" />
+              <h2 id="invite-title" className="title-lg mt-3">
+                {incomingInvite.fromName} wants to play
+              </h2>
+              <p className="mt-2 text-chalk">
+                Joda Memory, you against {incomingInvite.fromName}.{' '}
+                {gameStarted && gameMode === 'single' ? 'Accepting ends your solo game. ' : ''}
+                This request expires in {Math.max(0, Math.ceil((incomingInvite.expiresAt - inviteNow) / 1000))}s.
+              </p>
+              <div className="mt-6 flex flex-col gap-2">
+                <button type="button" onClick={() => answerInvite(true)} className="btn-gold" autoFocus>
+                  Accept
+                </button>
+                <button type="button" onClick={() => answerInvite(false)} className="btn-quiet">
+                  Decline
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Result dialog: round won, game won or solo board cleared */}
         {gameWon && winner && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-felt-deep/80 p-4">
@@ -1384,7 +1485,17 @@ export default function JodaMemory() {
         )}
 
         {/* Game Board */}
-        {!gameMode ? (
+        {!gameMode && showOnline ? (
+          <OnlinePlayers
+            socket={socketRef.current}
+            name={playerName}
+            onNameChange={setPlayerName}
+            playerKey={getPlayerKey()}
+            difficulty={difficulty}
+            onBack={() => setShowOnline(false)}
+            onRoomReady={enterInviteRoom}
+          />
+        ) : !gameMode ? (
           <section aria-labelledby="memory-mode-title" className="max-w-2xl">
             <h2 id="memory-mode-title" className="title-md mb-4">How do you want to play?</h2>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -1411,7 +1522,29 @@ export default function JodaMemory() {
                 <span className="title-md">Play with a friend</span>
                 <span className="text-sm text-ink-soft">Open a room, send the link and take turns finding pairs.</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setShowOnline(true)}
+                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift sm:col-span-2"
+              >
+                <span className="flex w-full items-center justify-between gap-3">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
+                    <Globe className="h-6 w-6" aria-hidden="true" />
+                  </span>
+                  <span className="rounded-full bg-ink/10 px-2.5 py-1 text-xs font-semibold text-ink-soft">
+                    {Math.max(0, onlineCount - 1)} online
+                  </span>
+                </span>
+                <span className="title-md">Find players online</span>
+                <span className="text-sm text-ink-soft">See who else has Joda Memory open and send them a game request.</span>
+              </button>
             </div>
+            {inviteError && (
+              <p role="alert" className="mt-4 text-sm text-white">
+                {inviteError}
+              </p>
+            )}
           </section>
         ) : !gameStarted ? (
           gameMode === 'multiplayer' && !isInLobby ? (

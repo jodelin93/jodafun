@@ -1,0 +1,205 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import type { Socket } from 'socket.io-client';
+import { ArrowLeft, Clock, Users, X } from 'lucide-react';
+
+export type OnlinePlayer = { id: string; name: string; isGuest: boolean; since: number };
+
+// The room the server creates when a request is accepted (same shape as a rejoin answer's room)
+export type InviteRoom = {
+  id: string;
+  players: { id: string; name: string; isHost: boolean; isReady: boolean; socketId: string; score: number }[];
+  difficulty: 'easy' | 'medium' | 'hard';
+  showOpponentMoves: boolean;
+  gameStarted: boolean;
+};
+
+type Outgoing =
+  | { status: 'waiting'; inviteId: string; toName: string; expiresAt: number }
+  | { status: 'declined' | 'expired'; inviteId: string; toName: string };
+
+type Props = {
+  socket: Socket | null;
+  name: string;
+  onNameChange: (name: string) => void;
+  playerKey: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  onBack: () => void;
+  onRoomReady: (room: InviteRoom) => void;
+};
+
+// Lists players who have Joda Memory open and aren't in a room, and sends them game requests
+export default function OnlinePlayers({ socket, name, onNameChange, playerKey, difficulty, onBack, onRoomReady }: Props) {
+  const [players, setPlayers] = useState<OnlinePlayer[] | null>(null);
+  const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  // Keep the list fresh: on open, whenever the server says it changed, after reconnects, and as a fallback every 15s
+  useEffect(() => {
+    if (!socket) return;
+    const load = () => socket.emit('presence:list', {}, (res: { players?: OnlinePlayer[] }) => setPlayers(res?.players ?? []));
+    load();
+    socket.on('presence:changed', load);
+    socket.on('connect', load);
+    const timer = setInterval(load, 15000);
+    return () => {
+      socket.off('presence:changed', load);
+      socket.off('connect', load);
+      clearInterval(timer);
+    };
+  }, [socket]);
+
+  // Answers to the request we sent
+  useEffect(() => {
+    if (!socket) return;
+    const declined = (d: { inviteId: string }) =>
+      setOutgoing(o => (o && o.inviteId === d.inviteId ? { status: 'declined', inviteId: o.inviteId, toName: o.toName } : o));
+    const expired = (d: { inviteId: string }) =>
+      setOutgoing(o => (o && o.inviteId === d.inviteId && o.status === 'waiting' ? { status: 'expired', inviteId: o.inviteId, toName: o.toName } : o));
+    const accepted = (d: { inviteId: string; room: InviteRoom }) => {
+      setOutgoing(null);
+      onRoomReady(d.room);
+    };
+    socket.on('invite:declined', declined);
+    socket.on('invite:expired', expired);
+    socket.on('invite:accepted', accepted);
+    return () => {
+      socket.off('invite:declined', declined);
+      socket.off('invite:expired', expired);
+      socket.off('invite:accepted', accepted);
+    };
+  }, [socket, onRoomReady]);
+
+  // Countdown while a request is waiting
+  useEffect(() => {
+    if (outgoing?.status !== 'waiting') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [outgoing?.status]);
+
+  const sendRequest = (player: OnlinePlayer) => {
+    if (!socket) return;
+    setSendError(null);
+    socket.emit(
+      'invite:send',
+      { toId: player.id, playerKey, difficulty },
+      (res: { success: boolean; inviteId?: string; expiresAt?: number; error?: string }) => {
+        if (!res?.success || !res.inviteId) {
+          setSendError(res?.error === 'Player not available' ? `${player.name} isn't available anymore.` : res?.error ?? "Couldn't send the request.");
+          return;
+        }
+        setNow(Date.now());
+        setOutgoing({ status: 'waiting', inviteId: res.inviteId, toName: player.name, expiresAt: res.expiresAt ?? Date.now() + 30000 });
+      },
+    );
+  };
+
+  const cancelRequest = () => {
+    if (!socket || outgoing?.status !== 'waiting') return;
+    socket.emit('invite:cancel', { inviteId: outgoing.inviteId }, () => {});
+    setOutgoing(null);
+  };
+
+  const secondsLeft = outgoing?.status === 'waiting' ? Math.max(0, Math.ceil((outgoing.expiresAt - now) / 1000)) : 0;
+
+  return (
+    <section aria-labelledby="online-title" className="max-w-2xl space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="online-title" className="title-md">Players online</h2>
+        <button type="button" onClick={onBack} className="btn-quiet btn-sm min-h-11">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          Back
+        </button>
+      </div>
+      <p className="text-chalk">People with Joda Memory open who aren&apos;t in a game room. Send a request and start playing when they accept.</p>
+
+      <div className="panel p-5">
+        <label htmlFor="online-name" className="field-label">
+          Your name (shown to other players)
+        </label>
+        <input
+          id="online-name"
+          value={name}
+          onChange={e => onNameChange(e.target.value)}
+          maxLength={20}
+          autoComplete="nickname"
+          placeholder="Choose a name"
+          className="field"
+        />
+      </div>
+
+      {outgoing && (
+        <div role="status" aria-live="polite" className="flex items-center justify-between gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-gold/40">
+          <p className="text-sm text-chalk">
+            {outgoing.status === 'waiting' && (
+              <>
+                <Clock className="mr-1.5 inline h-4 w-4 align-[-2px] text-gold" aria-hidden="true" />
+                Waiting for <span className="font-semibold text-white">{outgoing.toName}</span> to answer… {secondsLeft}s
+              </>
+            )}
+            {outgoing.status === 'declined' && (
+              <>
+                <span className="font-semibold text-white">{outgoing.toName}</span> declined your request.
+              </>
+            )}
+            {outgoing.status === 'expired' && (
+              <>
+                <span className="font-semibold text-white">{outgoing.toName}</span> didn&apos;t answer in time.
+              </>
+            )}
+          </p>
+          {outgoing.status === 'waiting' ? (
+            <button type="button" onClick={cancelRequest} className="btn-quiet btn-sm min-h-11 shrink-0">
+              Cancel
+            </button>
+          ) : (
+            <button type="button" onClick={() => setOutgoing(null)} className="btn btn-sm min-h-11 shrink-0 text-chalk hover:text-white" aria-label="Dismiss">
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {sendError && (
+        <p role="alert" className="text-sm text-white">
+          {sendError}
+        </p>
+      )}
+
+      {players === null ? (
+        <div className="panel p-5 text-chalk" role="status">
+          Looking for players…
+        </div>
+      ) : players.length === 0 ? (
+        <div className="panel p-5">
+          <Users className="h-8 w-8 text-chalk" strokeWidth={1.5} aria-hidden="true" />
+          <p className="mt-3 font-semibold">Nobody else is online right now</p>
+          <p className="mt-1 text-sm text-chalk">
+            Keep this page open and you&apos;ll show up for others, or go back and create a room to send a friend the link.
+          </p>
+        </div>
+      ) : (
+        <ul className="panel divide-y divide-table-rim overflow-hidden" aria-label="Players online">
+          {players.map(player => (
+            <li key={player.id} className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{player.name}</p>
+                {player.isGuest && <span className="chip mt-1 px-2 py-0.5 text-xs">Guest</span>}
+              </div>
+              <button
+                type="button"
+                onClick={() => sendRequest(player)}
+                disabled={outgoing?.status === 'waiting'}
+                className="btn-gold btn-sm min-h-11 shrink-0"
+              >
+                Request game
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
