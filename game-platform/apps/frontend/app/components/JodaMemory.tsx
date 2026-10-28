@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { getSoundManager } from '../lib/sounds/soundManager';
 import SoundControls from './SoundControls';
+import SiteHeader from './ui/SiteHeader';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -12,7 +14,7 @@ import {
   ArrowLeft, Volume2, Brain, X, Eye, EyeOff, Copy, Check, Link2,
   Pause, Play, Home, LogOut, MessageSquare, Send, Gem, Flame,
   Cherry, Cpu, Puzzle, Sword, Wand2, Smile, Ghost, Coffee,
-  Cake, PartyPopper, Gift, Sparkle
+  Cake, PartyPopper, Gift, Sparkle, User
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
@@ -172,6 +174,14 @@ export default function JodaMemory() {
   const [playerName, setPlayerName] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  // This client's seat in `players`; turns are compared against it instead of assuming seat 0
+  const [myPlayerIndex, setMyPlayerIndex] = useState(0);
+  const [roundTied, setRoundTied] = useState(false);
+  // Flips arrive over the socket; the listener calls the latest applyFlip through this ref to avoid stale state
+  const applyFlipRef = useRef<(cardId: number) => void>(() => {});
+  const roundsDealtRef = useRef(0);
+
+  const isMyTurn = gameMode === 'multiplayer' ? currentPlayerIndex === myPlayerIndex : currentPlayerIndex === 0;
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const aiTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -273,7 +283,7 @@ export default function JodaMemory() {
 
   // Play sound when it becomes player 1's turn (not for AI)
   useEffect(() => {
-    if (gameStarted && !gameWon && currentPlayerIndex === 0 && soundInitialized) {
+    if (gameStarted && !gameWon && isMyTurn && soundInitialized) {
       // Don't play on initial turn
       if (moves > 0) {
         const soundManager = getSoundManager();
@@ -281,7 +291,7 @@ export default function JodaMemory() {
       }
     }
     // Note: AI turn (currentPlayerIndex === 1 in single mode) does not play myTurn sound
-  }, [currentPlayerIndex, gameStarted, gameWon, soundInitialized, moves]);
+  }, [currentPlayerIndex, isMyTurn, gameStarted, gameWon, soundInitialized, moves]);
 
   // Timer effect
   useEffect(() => {
@@ -341,7 +351,14 @@ export default function JodaMemory() {
 
         setCards(mappedCards);
         setPlayers(data.players);
+        setMyPlayerIndex(Math.max(0, data.players.findIndex(p => p.socketId === socket.id)));
         setCurrentPlayerIndex(data.currentPlayerIndex);
+        setFlippedCards([]);
+        setRoundWinner(null);
+        setRoundTied(false);
+        // Every deal from the host after the first one is a new round
+        roundsDealtRef.current += 1;
+        setCurrentRound(roundsDealtRef.current);
         setGameStarted(true);
         setIsInLobby(false);
         setTimer(0);
@@ -354,9 +371,10 @@ export default function JodaMemory() {
       });
 
       // Listen for card flipped
+      // The server relays every flip to the whole room, including the player who flipped,
+      // so both boards apply the same flips in the same order and stay identical
       socket.on('cardFlipped', (data: { cardId: number; playerId: string }) => {
-        // This will be handled by the game logic
-        console.log('Card flipped by player:', data.playerId);
+        applyFlipRef.current(data.cardId);
       });
 
       // Listen for match found
@@ -433,6 +451,9 @@ export default function JodaMemory() {
         socket.off('gameWon');
         socket.off('playerLeft');
         socket.off('newHost');
+        socket.off('visibilityChanged');
+        socket.off('gamePaused');
+        socket.off('chatMessage');
         socket.off('connect_error');
       };
     } else {
@@ -450,7 +471,8 @@ export default function JodaMemory() {
     if (urlRoomId && !roomId && !gameMode) {
       setRoomId(urlRoomId);
       setGameMode('multiplayer');
-      setIsInLobby(true);
+      // Show the name step so the visitor actually joins the room before reaching the lobby
+      setIsInLobby(false);
     }
   }, [searchParams, roomId, gameMode]);
 
@@ -477,11 +499,20 @@ export default function JodaMemory() {
         // More rounds to play
         setGameWon(true); // Temporarily show round won state
       }
+    } else {
+      // Equal pairs: nobody wins the round, play moves on
+      setRoundTied(true);
+      setGameWon(true);
     }
   };
 
   // Start next round
   const handleNextRound = () => {
+    // In multiplayer the host deals the next round for both players over the socket
+    if (gameMode === 'multiplayer') {
+      if (isHost) handleMultiplayerStartGame();
+      return;
+    }
     setCurrentRound(prev => prev + 1);
     setRoundWinner(null);
     setGameWon(false);
@@ -532,12 +563,23 @@ export default function JodaMemory() {
 
   const handleCardClick = (cardId: number) => {
     if (!gameStarted || !soundInitialized || gamePaused) return;
+    if (!isMyTurn) return;
 
-    // In single player mode, only allow clicks when it's player's turn (index 0)
-    if (gameMode === 'single' && currentPlayerIndex !== 0) {
+    const card = cards.find(c => c.id === cardId);
+    if (!card || card.isFlipped || card.isMatched || flippedCards.length >= 2) {
       return;
     }
 
+    // Multiplayer flips are applied when the server echoes them back (see 'cardFlipped')
+    if (gameMode === 'multiplayer') {
+      socketRef.current?.emit('cardFlipped', { roomId, cardId });
+      return;
+    }
+
+    applyFlip(cardId);
+  };
+
+  const applyFlip = (cardId: number) => {
     const card = cards.find(c => c.id === cardId);
     if (!card || card.isFlipped || card.isMatched || flippedCards.length >= 2) {
       return;
@@ -633,6 +675,8 @@ export default function JodaMemory() {
     }
   };
 
+  applyFlipRef.current = applyFlip;
+
   // AI logic removed - single player is now solo challenge mode
 
   const handleModeSelect = (mode: 'single' | 'multiplayer') => {
@@ -689,6 +733,9 @@ export default function JodaMemory() {
     setRoundWins([0, 0]);
     setRoundWinner(null);
     setOverallWinner(null);
+    setRoundTied(false);
+    setMyPlayerIndex(0);
+    roundsDealtRef.current = 0;
   };
 
   const handleBackToMode = () => {
@@ -725,6 +772,11 @@ export default function JodaMemory() {
   };
 
   const handleRestart = () => {
+    // A local reshuffle would split the two boards; the host re-deals for everyone instead
+    if (gameMode === 'multiplayer') {
+      if (isHost) handleMultiplayerStartGame();
+      return;
+    }
     handleStartGame(difficulty);
   };
 
@@ -842,326 +894,306 @@ export default function JodaMemory() {
     ? players.reduce((prev, current) => prev.score > current.score ? prev : current)
     : null;
 
+  // Presentational only: the turn chip copy shown on the scoreboard and announced to screen readers
+  const turnLabel = (index: number) =>
+    index === (gameMode === 'multiplayer' ? myPlayerIndex : 0)
+      ? 'Your turn'
+      : gameMode === 'single' ? "AI's turn" : 'Their turn';
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 p-8 relative overflow-hidden">
-      {/* Animated Background Pattern */}
-      <div className="absolute inset-0 opacity-10">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `
-            radial-gradient(circle at 20% 50%, rgba(255,255,255,0.2) 0%, transparent 50%),
-            radial-gradient(circle at 80% 80%, rgba(255,255,255,0.2) 0%, transparent 50%),
-            radial-gradient(circle at 40% 20%, rgba(255,255,255,0.2) 0%, transparent 50%)
-          `
-        }}></div>
-      </div>
+    <div className="min-h-screen">
+      {gameStarted ? (
+        /* Slim game bar: one row on desktop, two compact rows on phones */
+        <header className="sticky top-0 z-40 border-b border-white/10 bg-felt-deep">
+          <div className="page flex flex-wrap items-center gap-x-3 gap-y-1 py-2 sm:gap-x-5">
+            <Link
+              href="/games"
+              className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-chalk transition hover:bg-white/5 hover:text-white"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Games
+            </Link>
+            <h1 className="title-md truncate">Joda Memory</h1>
 
-      <div className="max-w-6xl mx-auto relative z-10">
-        {/* Header with Logo */}
-        <div className="relative text-center mb-8">
-          {/* Back to Home Button - Top Left */}
-          <button
-            onClick={() => router.push('/')}
-            className="absolute left-0 top-0 flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-slate-700/50 to-slate-600/50 hover:from-slate-600/60 hover:to-slate-500/60 text-white rounded-lg font-medium shadow-lg hover:shadow-xl transition-all hover:scale-105 backdrop-blur-sm border border-white/10"
-          >
-            <Home className="w-5 h-5" />
-            Home
-          </button>
+            <dl className="order-last flex w-full items-center gap-5 pb-1 text-sm md:order-none md:ml-auto md:w-auto md:pb-0">
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-chalk">Time</dt>
+                <dd className="font-display text-lg font-bold tabular-nums">{formatTime(timer)}</dd>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-chalk">Moves</dt>
+                <dd className="font-display text-lg font-bold tabular-nums">{moves}</dd>
+              </div>
+              {gameMode === 'multiplayer' ? (
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-chalk">Round</dt>
+                  <dd className="font-display text-lg font-bold tabular-nums">{currentRound}</dd>
+                </div>
+              ) : (
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-chalk">Best</dt>
+                  <dd className="font-display text-lg font-bold tabular-nums">
+                    {bestTime ? formatTime(bestTime) : '--:--'}
+                  </dd>
+                </div>
+              )}
+            </dl>
 
-          <div className="flex items-center justify-center gap-4 mb-3">
-            <div className="relative">
-              <Sparkles className="w-12 h-12 text-yellow-300 animate-pulse" />
-              <Brain className="w-8 h-8 text-purple-300 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-            </div>
-            <h1 className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-pink-200 to-purple-200">
-              Joda Memory
-            </h1>
-            <div className="relative">
-              <Sparkles className="w-12 h-12 text-yellow-300 animate-pulse" />
-              <Trophy className="w-8 h-8 text-yellow-300 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+            <div className="ml-auto md:ml-0">
+              <SoundControls />
             </div>
           </div>
-          <p className="text-white/90 text-xl font-semibold tracking-wide">
-            ✨ Match the pairs to win! ✨
-          </p>
-        </div>
+        </header>
+      ) : (
+        <SiteHeader />
+      )}
 
-        {/* Game Controls */}
-        <div className="flex justify-between items-center mb-4">
-          {gameStarted && !gameWon ? (
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  const newPausedState = !gamePaused;
-                  setGamePaused(newPausedState);
-
-                  // Sync pause state in multiplayer
-                  if (gameMode === 'multiplayer' && socketRef.current && roomId) {
-                    socketRef.current.emit('togglePause', {
-                      roomId,
-                      paused: newPausedState
-                    });
-                  }
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-yellow-500/30 hover:bg-yellow-500/40 text-yellow-100 rounded-lg font-semibold transition-all"
-                title={gamePaused ? 'Resume' : 'Pause'}
-              >
-                {gamePaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
-                <span>{gamePaused ? 'Resume' : 'Pause'}</span>
-              </button>
-              <button
-                onClick={handleBackToMode}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500/30 hover:bg-blue-500/40 text-blue-100 rounded-lg font-semibold transition-all"
-                title="Main Menu"
-              >
-                <Home className="w-5 h-5" />
-                <span>Menu</span>
-              </button>
-              <button
-                onClick={handleBackToMenu}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500/30 hover:bg-red-500/40 text-red-100 rounded-lg font-semibold transition-all"
-                title="Quit Game"
-              >
-                <LogOut className="w-5 h-5" />
-                <span>Quit</span>
-              </button>
+      <main className={`page ${gameStarted ? 'py-4 md:py-6' : 'py-8 md:py-12'}`}>
+        {/* Title row for the menu and lobby screens; in a game the title lives in the game bar */}
+        {!gameStarted && (
+          <div className="mb-8 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="title-lg">Joda Memory</h1>
+              <p className="mt-2 text-chalk">Flip two cards at a time and find every matching pair.</p>
             </div>
-          ) : (
-            <div></div>
-          )}
-          <SoundControls />
-        </div>
-
-        {/* Game Stats Bar */}
-        {gameStarted && (
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6">
-            {/* Round Counter for Multiplayer */}
-            {gameMode === 'multiplayer' && (
-              <div className="text-center mb-4 pb-4 border-b border-white/20">
-                <div className="text-sm text-white/70 mb-2">Current Round</div>
-                <div className="text-5xl font-bold text-yellow-300">{currentRound}</div>
-                <div className="text-sm text-white/60 mt-1">First to 4 rounds wins!</div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-4 text-center mb-4">
-              <div>
-                <div className="text-sm text-white/70 mb-1">Time</div>
-                <div className="text-3xl font-bold text-white">{formatTime(timer)}</div>
-              </div>
-              <div>
-                <div className="text-sm text-white/70 mb-1">Moves</div>
-                <div className="text-3xl font-bold text-white">{moves}</div>
-              </div>
-              <div>
-                <div className="text-sm text-white/70 mb-1">{gameMode === 'multiplayer' ? 'Round Score' : 'Best Time'}</div>
-                <div className="text-3xl font-bold text-white">
-                  {gameMode === 'multiplayer' ? `${roundWins[0]} - ${roundWins[1]}` : (bestTime ? formatTime(bestTime) : '--:--')}
-                </div>
-              </div>
-            </div>
+            <SoundControls />
           </div>
         )}
 
-        {/* Player Stats */}
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6 mb-6">
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            {players.map((player, index) => (
-              <div
-                key={index}
-                className={`p-4 rounded-lg transition-all ${
-                  index === currentPlayerIndex && gameStarted && !gameWon
-                    ? 'bg-yellow-400/30 ring-2 ring-yellow-400'
-                    : 'bg-white/10'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">
-                      {player.name}
-                      {index === currentPlayerIndex && gameStarted && !gameWon && (
-                        <span className="ml-2 text-sm">
-                          {index === 0 ? '👈 Your turn!' : gameMode === 'single' ? '🤖 AI turn' : '⏳ Their turn'}
+        {/* Scoreboard */}
+        {gameStarted && (
+          <section aria-label="Scoreboard" className="mx-auto mb-4 max-w-3xl md:mb-6">
+            <p className="sr-only" aria-live="polite">
+              {currentPlayer && !gameWon ? turnLabel(currentPlayerIndex) : ''}
+            </p>
+            <div className={`grid gap-2 sm:gap-3 ${players.length > 1 ? 'grid-cols-2' : 'grid-cols-1 sm:max-w-xs'}`}>
+              {players.map((player, index) => {
+                const isTurn = index === currentPlayerIndex && gameStarted && !gameWon;
+                return (
+                  <div
+                    key={index}
+                    className={`panel flex items-center justify-between gap-3 p-3 transition sm:p-4 ${
+                      isTurn ? 'ring-2 ring-gold' : ''
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{player.name}</p>
+                      {isTurn ? (
+                        <span
+                          className={`mt-1 inline-flex whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            turnLabel(index) === 'Your turn' ? 'bg-signal text-ink' : 'bg-white/10 text-chalk ring-1 ring-inset ring-white/15'
+                          }`}
+                        >
+                          {turnLabel(index)}
                         </span>
-                      )}
-                    </h3>
-                    {player.isGuest && (
-                      <span className="text-xs text-white/60">Guest Player</span>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-3xl font-bold text-white">
-                      {player.score}
+                      ) : player.isGuest ? (
+                        <span className="mt-1 block text-xs text-chalk">Guest</span>
+                      ) : null}
                     </div>
-                    {gameMode === 'multiplayer' && (
-                      <div className="text-sm text-white/70 text-right">
-                        Rounds: {roundWins[index]}
-                      </div>
-                    )}
+                    <div className="shrink-0 text-right">
+                      <p className="font-display text-2xl font-extrabold leading-none tabular-nums sm:text-3xl">
+                        {player.score}
+                        <span className="sr-only"> pairs</span>
+                      </p>
+                      <p className="mt-1 text-xs text-chalk" aria-hidden="true">pairs</p>
+                      {gameMode === 'multiplayer' && (
+                        <p className="text-xs text-chalk">Rounds won: {roundWins[index]}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+            {gameMode === 'multiplayer' && (
+              <p className="mt-2 text-sm text-chalk">First to win 4 rounds wins the game.</p>
+            )}
+          </section>
+        )}
 
-          {/* Win Message */}
-          {gameWon && winner && (
-            <div className="text-center p-6 bg-green-500/30 rounded-lg">
+        {/* Result dialog: round won, game won or solo board cleared */}
+        {gameWon && winner && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-felt-deep/80 p-4">
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="memory-result-title"
+              className="panel w-full max-w-sm p-6 shadow-lift"
+            >
               {gameMode === 'multiplayer' && overallWinner !== null ? (
                 // Overall game winner
                 <>
-                  <h2 className="text-4xl font-bold text-white mb-4">
-                    🏆 {players[overallWinner]?.name} Wins the Game! 🏆
+                  <Trophy className="h-8 w-8 text-gold" aria-hidden="true" />
+                  <h2 id="memory-result-title" className="title-lg mt-3">
+                    {players[overallWinner]?.name} wins the game
                   </h2>
-                  <p className="text-white/90 text-xl mb-2">
-                    Overall Score: {roundWins[overallWinner]} - {roundWins[overallWinner === 0 ? 1 : 0]}
-                  </p>
-                  <p className="text-white/80">
-                    Won {roundWins[overallWinner]} out of {currentRound} rounds
-                  </p>
+                  <dl className="mt-4 space-y-1 text-chalk">
+                    <div className="flex justify-between gap-4">
+                      <dt>Rounds won</dt>
+                      <dd className="font-semibold tabular-nums text-white">
+                        {roundWins[overallWinner]} to {roundWins[overallWinner === 0 ? 1 : 0]}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Rounds played</dt>
+                      <dd className="font-semibold tabular-nums text-white">{currentRound}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-6 flex flex-col gap-2">
+                    <button type="button" onClick={handleBackToMenu} className="btn-quiet" autoFocus>
+                      Back to menu
+                    </button>
+                  </div>
                 </>
               ) : gameMode === 'multiplayer' && roundWinner !== null ? (
                 // Round winner
                 <>
-                  <h2 className="text-3xl font-bold text-white mb-3">
-                    🎉 {players[roundWinner]?.name} Won Round {currentRound}! 🎉
+                  <h2 id="memory-result-title" className="title-lg">
+                    {players[roundWinner]?.name} won round {currentRound}
                   </h2>
-                  <p className="text-white/90 mb-3">
-                    Round Score: {roundWinner !== null && players[roundWinner] ? `${players[roundWinner].score} - ${players[roundWinner === 0 ? 1 : 0]?.score ?? 0}` : ''} pairs
-                  </p>
-                  <p className="text-white/90 text-lg mb-4">
-                    Overall Score: {roundWins[0]} - {roundWins[1]}
-                  </p>
-                  <button
-                    onClick={handleNextRound}
-                    className="px-8 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white font-bold rounded-lg shadow-lg transition-all hover:scale-105"
-                  >
-                    Next Round →
-                  </button>
+                  <dl className="mt-4 space-y-1 text-chalk">
+                    <div className="flex justify-between gap-4">
+                      <dt>Pairs this round</dt>
+                      <dd className="font-semibold tabular-nums text-white">
+                        {roundWinner !== null && players[roundWinner] ? `${players[roundWinner].score} to ${players[roundWinner === 0 ? 1 : 0]?.score ?? 0}` : ''}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Rounds won</dt>
+                      <dd className="font-semibold tabular-nums text-white">
+                        {roundWins[0]} to {roundWins[1]}
+                      </dd>
+                    </div>
+                  </dl>
+                  <NextRoundActions isHost={isHost} onNextRound={handleNextRound} onLeave={handleBackToMenu} />
+                </>
+              ) : gameMode === 'multiplayer' && roundTied ? (
+                // Tied round: no round win, play continues
+                <>
+                  <h2 id="memory-result-title" className="title-lg">
+                    Round {currentRound} is a tie
+                  </h2>
+                  <p className="mt-2 text-chalk">You found the same number of pairs, so nobody wins this round.</p>
+                  <dl className="mt-4 space-y-1 text-chalk">
+                    <div className="flex justify-between gap-4">
+                      <dt>Rounds won</dt>
+                      <dd className="font-semibold tabular-nums text-white">
+                        {roundWins[0]} to {roundWins[1]}
+                      </dd>
+                    </div>
+                  </dl>
+                  <NextRoundActions isHost={isHost} onNextRound={handleNextRound} onLeave={handleBackToMenu} />
                 </>
               ) : (
                 // Single player victory
                 <>
-                  <h2 className="text-3xl font-bold text-white mb-2">
-                    🎉 Round Complete! 🎉
-                  </h2>
-                  <p className="text-white/80 mb-2">
-                    Score: {winner.score} pairs
-                  </p>
-                  <p className="text-white/80 mb-4">
-                    Time: {formatTime(timer)} | Moves: {moves}
-                  </p>
+                  <h2 id="memory-result-title" className="title-lg">You found every pair</h2>
                   {timer === bestTime && (
-                    <p className="text-yellow-300 font-bold mb-4">
-                      ⭐ New Best Time! ⭐
+                    <p className="chip mt-3 text-white">
+                      <Trophy className="h-4 w-4 text-gold" aria-hidden="true" />
+                      New best time
                     </p>
                   )}
-                  <button
-                    onClick={handleNextRound}
-                    className="mt-4 px-8 py-3 bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white rounded-xl font-bold shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 mx-auto"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                    Next Round →
-                  </button>
+                  <dl className="mt-4 space-y-1 text-chalk">
+                    <div className="flex justify-between gap-4">
+                      <dt>Pairs</dt>
+                      <dd className="font-semibold tabular-nums text-white">{winner.score}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Time</dt>
+                      <dd className="font-semibold tabular-nums text-white">{formatTime(timer)}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Moves</dt>
+                      <dd className="font-semibold tabular-nums text-white">{moves}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-6 flex flex-col gap-2">
+                    <button type="button" onClick={handleNextRound} className="btn-gold" autoFocus>
+                      Play again
+                    </button>
+                    <button type="button" onClick={handleBackToMenu} className="btn-quiet">
+                      Back to menu
+                    </button>
+                  </div>
                 </>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Game Board */}
-        {!gameMode || (!gameStarted && !isInLobby && gameMode === 'multiplayer' && !roomId) ? (
-          <div className="text-center py-10">
-            <h2 className="text-4xl font-bold text-white mb-10 flex items-center justify-center gap-3">
-              <Gamepad2 className="w-10 h-10 text-yellow-300" />
-              Select Game Mode
-              <Gamepad2 className="w-10 h-10 text-yellow-300" />
-            </h2>
-            <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto mb-8">
+        {!gameMode ? (
+          <section aria-labelledby="memory-mode-title" className="max-w-2xl">
+            <h2 id="memory-mode-title" className="title-md mb-4">How do you want to play?</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
               <button
+                type="button"
                 onClick={() => handleModeSelect('single')}
-                className="group relative bg-gradient-to-br from-blue-500/20 to-cyan-500/20 backdrop-blur-sm border-2 border-blue-400/40 hover:border-blue-300 rounded-3xl p-12 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/50"
+                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift"
               >
-                <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-40 transition-opacity">
-                  <Zap className="w-16 h-16 text-blue-300" />
-                </div>
-                <div className="mb-6 relative">
-                  <div className="inline-block relative">
-                    <Bot className="w-24 h-24 text-blue-300 group-hover:text-blue-200 transition-colors" strokeWidth={1.5} />
-                    <Sparkles className="w-8 h-8 text-yellow-300 absolute -top-2 -right-2 animate-pulse" />
-                  </div>
-                </div>
-                <h3 className="text-4xl font-black text-white mb-4 group-hover:text-blue-100 transition-colors">
-                  Single Player
-                </h3>
-                <p className="text-white/80 text-xl mb-2 font-semibold">Play against AI</p>
-                <p className="text-white/60 text-sm">Challenge the computer opponent</p>
-                <div className="mt-6 flex items-center justify-center gap-2 text-blue-200">
-                  <Brain className="w-5 h-5" />
-                  <span className="text-sm font-medium">Smart AI Opponent</span>
-                </div>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
+                  <User className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <span className="title-md">Play solo</span>
+                <span className="text-sm text-ink-soft">Find every pair as fast as you can and beat your best time.</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => handleModeSelect('multiplayer')}
-                className="group relative bg-gradient-to-br from-purple-500/20 to-pink-500/20 backdrop-blur-sm border-2 border-purple-400/40 hover:border-purple-300 rounded-3xl p-12 transition-all hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/50"
+                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift"
               >
-                <div className="absolute top-4 right-4 opacity-20 group-hover:opacity-40 transition-opacity">
-                  <Heart className="w-16 h-16 text-pink-300" />
-                </div>
-                <div className="mb-6 relative">
-                  <div className="inline-block relative">
-                    <Users className="w-24 h-24 text-purple-300 group-hover:text-purple-200 transition-colors" strokeWidth={1.5} />
-                    <Sparkles className="w-8 h-8 text-yellow-300 absolute -top-2 -right-2 animate-pulse" />
-                  </div>
-                </div>
-                <h3 className="text-4xl font-black text-white mb-4 group-hover:text-purple-100 transition-colors">
-                  Multiplayer
-                </h3>
-                <p className="text-white/80 text-xl mb-2 font-semibold">Play with a friend</p>
-                <p className="text-white/60 text-sm">Local two-player mode</p>
-                <div className="mt-6 flex items-center justify-center gap-2 text-purple-200">
-                  <Heart className="w-5 h-5" />
-                  <span className="text-sm font-medium">2-Player Local Mode</span>
-                </div>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
+                  <Users className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <span className="title-md">Play with a friend</span>
+                <span className="text-sm text-ink-soft">Open a room, send the link and take turns finding pairs.</span>
               </button>
             </div>
-          </div>
+          </section>
         ) : !gameStarted ? (
           gameMode === 'multiplayer' && !isInLobby ? (
             /* Multiplayer Name Input */
-            <div className="text-center py-10 max-w-md mx-auto">
-              <h2 className="text-3xl font-bold text-white mb-8">Enter Your Name</h2>
+            <section aria-labelledby="memory-name-title" className="max-w-md">
+              <h2 id="memory-name-title" className="title-md mb-4">
+                {roomId ? "Join your friend's game" : 'Create a room'}
+              </h2>
 
               {connectionError && (
-                <div className="bg-red-500/20 border-2 border-red-400 rounded-lg p-6 mb-6">
-                  <div className="flex items-center justify-center gap-3 mb-2">
-                    <X className="w-8 h-8 text-red-300" />
-                    <h3 className="text-2xl font-bold text-red-200">
-                      {connectionError.includes('full') || connectionError.includes('expired') ? 'Link Expired' : 'Error'}
+                <div role="alert" className="panel mb-4 p-5 ring-signal/60">
+                  <div className="flex items-center gap-2">
+                    <X className="h-5 w-5 text-signal" aria-hidden="true" />
+                    <h3 className="font-display text-lg font-bold">
+                      {connectionError.includes('full') || connectionError.includes('expired') ? 'This room is full or has expired' : "Couldn't join the room"}
                     </h3>
                   </div>
-                  <p className="text-red-200 text-center">{connectionError}</p>
+                  <p className="mt-1 text-chalk">{connectionError}</p>
                   <button
                     onClick={() => {
                       setConnectionError(null);
                       setRoomId(null);
                       setGameMode(null);
                     }}
-                    className="mt-4 px-6 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg font-semibold transition-colors mx-auto block"
+                    className="btn-quiet btn-sm mt-4"
                   >
-                    Back to Menu
+                    Back to menu
                   </button>
                 </div>
               )}
 
-              <div className="bg-white/10 backdrop-blur-sm border-2 border-purple-400/40 rounded-2xl p-8 mb-6">
+              <div className="panel p-5 sm:p-6">
+                <label htmlFor="memory-player-name" className="field-label">
+                  Your name
+                </label>
                 <input
+                  id="memory-player-name"
                   type="text"
                   value={playerName}
                   onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder="The name your friend will see"
                   maxLength={20}
-                  className="w-full px-4 py-3 bg-white/20 border-2 border-white/30 rounded-lg text-white placeholder-white/50 text-center text-xl font-semibold focus:outline-none focus:border-purple-400 transition-colors"
+                  autoComplete="nickname"
+                  className="field"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && playerName.trim()) {
                       if (roomId) {
@@ -1173,234 +1205,246 @@ export default function JodaMemory() {
                   }}
                 />
 
-                <div className="mt-6 grid grid-cols-2 gap-4">
+                <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                   {!roomId && (
                     <button
                       onClick={handleCreateGame}
                       disabled={!playerName.trim()}
-                      className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-gold sm:flex-1"
                     >
-                      Create Game
+                      Create room
                     </button>
                   )}
                   {roomId && (
                     <button
                       onClick={handleJoinGame}
                       disabled={!playerName.trim()}
-                      className="col-span-2 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="btn-gold sm:flex-1"
                     >
-                      Join Game
+                      Join game
                     </button>
                   )}
                   <button
                     onClick={handleBackToMode}
-                    className="col-span-full px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/30 transition-colors"
+                    className="btn-quiet"
                   >
                     Back
                   </button>
                 </div>
               </div>
-            </div>
+            </section>
           ) : gameMode === 'multiplayer' && isInLobby ? (
             /* Multiplayer Lobby */
-            <div className="text-center py-10 max-w-2xl mx-auto">
-              <h2 className="text-3xl font-bold text-white mb-8">Game Lobby</h2>
+            <section aria-labelledby="memory-lobby-title" className="max-w-2xl space-y-4">
+              <h2 id="memory-lobby-title" className="title-md">Game room</h2>
 
               {/* Room Code */}
-              <div className="bg-white/10 backdrop-blur-sm border-2 border-purple-400/40 rounded-2xl p-6 mb-6">
-                <p className="text-white/70 mb-2">Room Code</p>
-                <div className="flex items-center justify-center gap-3">
-                  <span className="text-4xl font-black text-white tracking-widest">{roomId}</span>
+              <div className="panel p-5">
+                <p className="text-sm text-chalk">Room code</p>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+                  <span className="break-all font-display text-2xl font-extrabold sm:text-3xl">{roomId}</span>
                   <button
+                    type="button"
                     onClick={handleCopyRoomLink}
-                    className="p-3 bg-purple-500/30 hover:bg-purple-500/40 rounded-lg transition-colors"
-                    title="Copy room link"
+                    className="btn-quiet btn-sm min-h-11"
                   >
-                    {copiedLink ? <Check className="w-6 h-6 text-green-300" /> : <Copy className="w-6 h-6 text-white" />}
+                    {copiedLink ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+                    {copiedLink ? 'Copied' : 'Copy link'}
                   </button>
                 </div>
-                {copiedLink && <p className="text-green-300 text-sm mt-2">Link copied to clipboard!</p>}
+                <p className="mt-3 text-sm text-chalk" aria-live="polite">
+                  {copiedLink ? 'Copied. Send the link to your friend so they can join.' : 'Send the room link to a friend so they can join.'}
+                </p>
               </div>
 
               {/* Players List */}
-              <div className="bg-white/10 backdrop-blur-sm border-2 border-purple-400/40 rounded-2xl p-6 mb-6">
-                <h3 className="text-xl font-bold text-white mb-4">Players ({lobbyPlayers.length}/2)</h3>
-                <div className="space-y-3">
+              <div className="panel p-5">
+                <h3 className="font-display text-lg font-bold">Players ({lobbyPlayers.length} of 2)</h3>
+                <ul className="mt-3 space-y-2">
                   {lobbyPlayers.map((player) => (
-                    <div
+                    <li
                       key={player.id}
-                      className="flex items-center justify-between bg-white/5 rounded-lg p-4"
+                      className="flex items-center justify-between gap-3 rounded-xl bg-felt-deep/60 px-4 py-3"
                     >
-                      <div className="flex items-center gap-3">
-                        <Users className="w-6 h-6 text-purple-300" />
-                        <span className="text-white font-semibold">{player.name}</span>
-                        {player.isHost && (
-                          <span className="text-xs bg-yellow-500/30 text-yellow-200 px-2 py-1 rounded">HOST</span>
-                        )}
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-semibold">{player.name}</span>
+                        {player.isHost && <span className="chip px-2 py-0.5 text-xs">Host</span>}
                       </div>
-                      <div>
-                        {player.isReady ? (
-                          <span className="text-green-300 font-semibold">✓ Ready</span>
-                        ) : (
-                          <span className="text-white/50">Not Ready</span>
-                        )}
-                      </div>
-                    </div>
+                      {player.isReady ? (
+                        <span className="chip shrink-0 text-white ring-gold/50">
+                          <Check className="h-4 w-4 text-gold" aria-hidden="true" />
+                          Ready
+                        </span>
+                      ) : (
+                        <span className="chip shrink-0">Not ready</span>
+                      )}
+                    </li>
                   ))}
                   {lobbyPlayers.length < 2 && (
-                    <div className="flex items-center justify-center bg-white/5 rounded-lg p-4 border-2 border-dashed border-white/20">
-                      <span className="text-white/50">Waiting for another player...</span>
-                    </div>
+                    <li className="rounded-xl border border-dashed border-white/20 px-4 py-3 text-chalk">
+                      Waiting for your friend to join…
+                    </li>
                   )}
-                </div>
+                </ul>
               </div>
 
               {/* Game Settings - Visibility Toggle */}
-              <div className="bg-white/10 backdrop-blur-sm border-2 border-purple-400/40 rounded-2xl p-6 mb-6">
-                <h3 className="text-xl font-bold text-white mb-4">Game Settings</h3>
-                <div className="flex items-center justify-between bg-white/5 rounded-lg p-4">
-                  <div className="flex items-center gap-3">
-                    {showOpponentMoves ? <Eye className="w-6 h-6 text-green-300" /> : <EyeOff className="w-6 h-6 text-red-300" />}
-                    <div className="text-left">
-                      <p className="text-white font-semibold">Opponent Card Visibility</p>
-                      <p className="text-white/60 text-sm">
-                        {showOpponentMoves ? 'Cards shown during opponent turn' : 'Cards hidden during opponent turn'}
-                      </p>
-                    </div>
-                  </div>
-                  {isHost ? (
-                    <button
-                      onClick={() => {
-                        const newValue = !showOpponentMoves;
-                        setShowOpponentMoves(newValue);
-                        if (socketRef.current && roomId) {
-                          socketRef.current.emit('toggleOpponentMoves', { roomId, showOpponentMoves: newValue });
-                        }
-                      }}
-                      className={`px-6 py-2 rounded-lg font-semibold transition-all ${
-                        showOpponentMoves
-                          ? 'bg-green-500/30 text-green-100 hover:bg-green-500/40'
-                          : 'bg-red-500/30 text-red-100 hover:bg-red-500/40'
-                      }`}
-                    >
-                      {showOpponentMoves ? 'Showing' : 'Hidden'}
-                    </button>
+              <div className="panel flex items-center justify-between gap-4 p-5">
+                <div className="flex items-start gap-3">
+                  {showOpponentMoves ? (
+                    <Eye className="mt-0.5 h-5 w-5 shrink-0 text-chalk" aria-hidden="true" />
                   ) : (
-                    <span className={`px-6 py-2 rounded-lg font-semibold ${
-                      showOpponentMoves ? 'bg-green-500/20 text-green-200' : 'bg-red-500/20 text-red-200'
-                    }`}>
-                      {showOpponentMoves ? 'Showing' : 'Hidden'}
-                    </span>
+                    <EyeOff className="mt-0.5 h-5 w-5 shrink-0 text-chalk" aria-hidden="true" />
                   )}
+                  <div>
+                    <p id="memory-visibility-label" className="font-semibold">Show cards on their turn</p>
+                    <p className="text-sm text-chalk">
+                      {showOpponentMoves ? 'You can see the cards your friend flips.' : 'Cards are hidden while your friend plays.'}
+                    </p>
+                  </div>
                 </div>
+                {isHost ? (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showOpponentMoves}
+                    aria-labelledby="memory-visibility-label"
+                    onClick={() => {
+                      const newValue = !showOpponentMoves;
+                      setShowOpponentMoves(newValue);
+                      if (socketRef.current && roomId) {
+                        socketRef.current.emit('toggleOpponentMoves', { roomId, showOpponentMoves: newValue });
+                      }
+                    }}
+                    className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full p-1 transition ${
+                      showOpponentMoves ? 'bg-gold' : 'bg-felt-deep ring-1 ring-inset ring-table-rim'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`h-6 w-6 rounded-full shadow transition-transform ${
+                        showOpponentMoves ? 'translate-x-6 bg-ink' : 'translate-x-0 bg-chalk'
+                      }`}
+                    />
+                  </button>
+                ) : (
+                  <span className="chip shrink-0">
+                    {showOpponentMoves ? 'On' : 'Off'}
+                  </span>
+                )}
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-4 justify-center">
-                <button
-                  onClick={handleToggleReady}
-                  disabled={lobbyPlayers.length < 2}
-                  className={`px-8 py-3 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                    isReady
-                      ? 'bg-red-500/30 text-red-100 hover:bg-red-500/40'
-                      : 'bg-green-500/30 text-green-100 hover:bg-green-500/40'
-                  }`}
-                >
-                  {isReady ? 'Not Ready' : 'Ready'}
-                </button>
-
+              <p className="text-chalk" aria-live="polite">
+                {lobbyPlayers.length < 2
+                  ? 'Waiting for your friend to join…'
+                  : !lobbyPlayers.every(p => p.isReady)
+                    ? 'The game can start when both players are ready.'
+                    : isHost
+                      ? 'Everyone is ready. Start the game when you are.'
+                      : 'Everyone is ready. Waiting for the host to start the game.'}
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
                 {isHost && (
                   <button
                     onClick={handleMultiplayerStartGame}
                     disabled={!lobbyPlayers.every(p => p.isReady) || lobbyPlayers.length < 2}
-                    className="px-8 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-semibold hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="btn-gold"
                   >
-                    Start Game
+                    Start game
                   </button>
                 )}
 
                 <button
-                  onClick={handleBackToMenu}
-                  className="px-8 py-3 bg-white/20 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/30 transition-colors"
+                  onClick={handleToggleReady}
+                  disabled={lobbyPlayers.length < 2}
+                  aria-pressed={isReady}
+                  className="btn-quiet"
                 >
-                  Leave Lobby
+                  {isReady ? <Check className="h-4 w-4 text-gold" aria-hidden="true" /> : null}
+                  {isReady ? "I'm ready" : 'Mark me ready'}
+                </button>
+
+                <button
+                  onClick={handleBackToMenu}
+                  className="btn-quiet sm:ml-auto"
+                >
+                  Leave room
                 </button>
               </div>
-            </div>
+            </section>
           ) : (
             /* Single Player Difficulty Selection */
-            <div className="text-center py-10">
-              <h2 className="text-3xl font-bold text-white mb-8">Select Difficulty</h2>
-              <div className="grid md:grid-cols-3 gap-6 mb-8">
-                <button
-                  onClick={() => handleStartGame('easy')}
-                  className="group relative bg-white/10 backdrop-blur-sm border-2 border-white/20 hover:border-green-400/60 rounded-2xl p-8 transition-all hover:scale-105"
-                >
-                  <div className="text-6xl mb-4">🟢</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Easy</h3>
-                  <p className="text-white/70">8 cards (4 pairs)</p>
-                  <p className="text-white/60 text-sm mt-2">Perfect for beginners</p>
-                </button>
+            <section aria-labelledby="memory-difficulty-title" className="max-w-md">
+              <h2 id="memory-difficulty-title" className="title-md mb-4">Choose a difficulty</h2>
+              <div
+                role="group"
+                aria-labelledby="memory-difficulty-title"
+                className="grid grid-cols-3 gap-1 rounded-2xl bg-felt-deep p-1 ring-1 ring-inset ring-table-rim"
+              >
+                {([
+                  ['easy', 'Easy', '8 cards'],
+                  ['medium', 'Medium', '16 cards'],
+                  ['hard', 'Hard', '24 cards'],
+                ] as const).map(([value, label, count]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={difficulty === value}
+                    onClick={() => setDifficulty(value)}
+                    className={`flex min-h-14 flex-col items-center justify-center rounded-xl px-2 py-2 transition ${
+                      difficulty === value ? 'bg-card text-ink shadow-rest' : 'text-chalk hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <span className="font-semibold">{label}</span>
+                    <span className={`text-xs ${difficulty === value ? 'text-ink-soft' : 'text-chalk/80'}`}>{count}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-sm text-chalk">
+                {bestTime ? `Your best time on this level: ${formatTime(bestTime)}` : 'No best time on this level yet.'}
+              </p>
 
+              <div className="mt-6 flex flex-col gap-2 sm:flex-row">
                 <button
-                  onClick={() => handleStartGame('medium')}
-                  className="group relative bg-white/10 backdrop-blur-sm border-2 border-yellow-400/60 hover:border-yellow-400 rounded-2xl p-8 transition-all hover:scale-105"
+                  type="button"
+                  onClick={() => handleStartGame(difficulty)}
+                  className="btn-gold sm:flex-1"
                 >
-                  <div className="text-6xl mb-4">🟡</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Medium</h3>
-                  <p className="text-white/70">16 cards (8 pairs)</p>
-                  <p className="text-white/60 text-sm mt-2">Good challenge</p>
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                  Start game
                 </button>
-
                 <button
-                  onClick={() => handleStartGame('hard')}
-                  className="group relative bg-white/10 backdrop-blur-sm border-2 border-red-400/60 hover:border-red-400 rounded-2xl p-8 transition-all hover:scale-105"
+                  onClick={handleBackToMode}
+                  className="btn-quiet"
                 >
-                  <div className="text-6xl mb-4">🔴</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Hard</h3>
-                  <p className="text-white/70">24 cards (12 pairs)</p>
-                  <p className="text-white/60 text-sm mt-2">Expert level</p>
+                  Back
                 </button>
               </div>
-
-              <button
-                onClick={handleBackToMode}
-                className="px-6 py-3 bg-white/20 backdrop-blur-sm text-white rounded-lg font-semibold
-                         hover:bg-white/30 transition-colors"
-              >
-                Back to Mode Selection
-              </button>
-            </div>
+            </section>
           )
         ) : (
           <>
-            <div className={`grid gap-3 mb-6 max-w-4xl mx-auto relative`} style={{ gridTemplateColumns: `repeat(${GRID_COLS[difficulty]}, minmax(0, 1fr))` }}>
+            <div
+              className={`relative mx-auto grid gap-2 md:gap-3 ${
+                difficulty === 'hard' ? 'grid-cols-4 md:max-w-3xl md:grid-cols-6' : 'max-w-lg grid-cols-4'
+              }`}
+            >
               {/* Overlay when it's not your turn AND visibility is disabled */}
-              {currentPlayerIndex !== 0 && !showOpponentMoves && (
-                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm z-10 rounded-xl flex items-center justify-center">
-                  <div className="bg-gradient-to-br from-white to-gray-50 px-10 py-8 rounded-2xl shadow-2xl text-center border-4 border-purple-200">
+              {!isMyTurn && !showOpponentMoves && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-felt-deep/80 p-4">
+                  <div className="panel max-w-xs p-6 text-center shadow-lift">
                     {gameMode === 'single' ? (
                       <>
-                        <div className="mb-4 flex justify-center">
-                          <div className="relative">
-                            <Bot className="w-20 h-20 text-blue-500 animate-pulse" strokeWidth={1.5} />
-                            <Brain className="w-8 h-8 text-purple-500 absolute -top-2 -right-2 animate-bounce" />
-                          </div>
-                        </div>
-                        <h3 className="text-3xl font-black text-gray-800 mb-3 flex items-center justify-center gap-2">
-                          <Zap className="w-6 h-6 text-yellow-500" />
-                          Computer Thinking
-                          <Zap className="w-6 h-6 text-yellow-500" />
-                        </h3>
-                        <p className="text-gray-600 font-medium">AI is making its move...</p>
+                        <Bot className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
+                        <h3 className="title-md mt-3">The computer is playing</h3>
+                        <p className="mt-1 text-chalk">Your turn is next.</p>
                       </>
                     ) : (
                       <>
-                        <div className="mb-4 flex justify-center">
-                          <Clock className="w-20 h-20 text-purple-500 animate-spin" strokeWidth={1.5} style={{ animationDuration: '3s' }} />
-                        </div>
-                        <h3 className="text-3xl font-black text-gray-800 mb-3">Waiting for Player 2</h3>
-                        <p className="text-gray-600 font-medium">It's their turn to play...</p>
+                        <Clock className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
+                        <h3 className="title-md mt-3">Their turn</h3>
+                        <p className="mt-1 text-chalk">Cards are hidden while your friend plays.</p>
                       </>
                     )}
                   </div>
@@ -1409,13 +1453,11 @@ export default function JodaMemory() {
 
               {/* Pause Overlay */}
               {gamePaused && (
-                <div className="absolute inset-0 bg-black/60 backdrop-blur-md z-20 rounded-xl flex items-center justify-center">
-                  <div className="bg-gradient-to-br from-white to-gray-50 px-12 py-10 rounded-2xl shadow-2xl text-center border-4 border-yellow-200">
-                    <div className="mb-4 flex justify-center">
-                      <Pause className="w-24 h-24 text-yellow-500" strokeWidth={1.5} />
-                    </div>
-                    <h3 className="text-4xl font-black text-gray-800 mb-4">Game Paused</h3>
-                    <p className="text-gray-600 font-medium mb-6">Click Resume to continue playing</p>
+                <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-felt-deep/90 p-4">
+                  <div className="panel max-w-xs p-6 text-center shadow-lift">
+                    <Pause className="mx-auto h-10 w-10 text-chalk" strokeWidth={1.5} aria-hidden="true" />
+                    <h3 className="title-md mt-3">Game paused</h3>
+                    <p className="mt-1 text-chalk">The timer is stopped. Resume when you&apos;re ready.</p>
                     <button
                       onClick={() => {
                         setGamePaused(false);
@@ -1428,105 +1470,51 @@ export default function JodaMemory() {
                           });
                         }
                       }}
-                      className="px-8 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-white font-bold rounded-lg shadow-lg transition-all hover:scale-105 flex items-center gap-2 mx-auto"
+                      className="btn-gold mt-5 w-full"
                     >
-                      <Play className="w-5 h-5" />
-                      Resume Game
+                      <Play className="h-4 w-4" aria-hidden="true" />
+                      Resume game
                     </button>
                   </div>
                 </div>
               )}
 
-              {cards.map((card) => (
-                <div
+              {cards.map((card, index) => (
+                <button
                   key={card.id}
-                  className={`relative transition-all duration-500 ${
-                    card.isMatched ? 'opacity-0 scale-0' : ''
+                  type="button"
+                  onClick={() => handleCardClick(card.id)}
+                  disabled={card.isMatched || card.isFlipped || !isMyTurn}
+                  aria-label={`Card ${index + 1}, ${
+                    card.isMatched
+                      ? `matched, ${card.iconName.replace('img', 'picture ')}`
+                      : card.isFlipped
+                        ? `face up, ${card.iconName.replace('img', 'picture ')}`
+                        : 'face down'
                   }`}
-                  style={{
-                    perspective: '1000px',
-                    aspectRatio: '1'
-                  }}
+                  className={`flip-scene aspect-[3/4] w-full rounded-card ${
+                    isMyTurn && !card.isMatched && !card.isFlipped
+                      ? 'cursor-pointer'
+                      : showOpponentMoves && !isMyTurn
+                      ? 'cursor-default'
+                      : 'cursor-not-allowed'
+                  }`}
                 >
-                  <button
-                    onClick={() => handleCardClick(card.id)}
-                    disabled={card.isMatched || card.isFlipped || currentPlayerIndex !== 0}
-                    className={`relative w-full h-full ${
-                      currentPlayerIndex === 0 && !card.isMatched && !card.isFlipped
-                        ? 'cursor-pointer'
-                        : showOpponentMoves && currentPlayerIndex !== 0
-                        ? 'cursor-default'
-                        : 'cursor-not-allowed'
-                    }`}
-                    style={{
-                      transformStyle: 'preserve-3d',
-                      transition: 'transform 0.6s',
-                      transform: card.isFlipped || card.isMatched ? 'rotateY(180deg)' : 'rotateY(0deg)'
-                    }}
-                  >
-                    {/* Card Back */}
-                    <div
-                      className="absolute inset-0 rounded-xl flex items-center justify-center overflow-hidden shadow-2xl"
-                      style={{
-                        backfaceVisibility: 'hidden',
-                        transform: 'rotateY(0deg)'
-                      }}
-                    >
-                      {/* Multi-layer gradient background */}
-                      <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600"></div>
-                      <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/50 via-transparent to-pink-500/50"></div>
-
-                      {/* Geometric pattern overlay */}
-                      <div className="absolute inset-0 opacity-20" style={{
-                        backgroundImage: `
-                          repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.1) 10px, rgba(255,255,255,0.1) 20px),
-                          repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255,255,255,0.05) 10px, rgba(255,255,255,0.05) 20px)
-                        `,
-                      }}></div>
-
-                      {/* Center icon */}
-                      <div className="relative z-10">
-                        <div className="relative">
-                          <Sparkles className="w-12 h-12 text-yellow-200 animate-pulse" strokeWidth={2} />
-                          <Brain className="w-6 h-6 text-white absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" strokeWidth={2.5} />
-                        </div>
-                      </div>
-
-                      {/* Decorative corners */}
-                      <div className="absolute top-2 left-2">
-                        <Star className="w-4 h-4 text-yellow-200/60" fill="currentColor" />
-                      </div>
-                      <div className="absolute top-2 right-2">
-                        <Star className="w-4 h-4 text-yellow-200/60" fill="currentColor" />
-                      </div>
-                      <div className="absolute bottom-2 left-2">
-                        <Star className="w-4 h-4 text-yellow-200/60" fill="currentColor" />
-                      </div>
-                      <div className="absolute bottom-2 right-2">
-                        <Star className="w-4 h-4 text-yellow-200/60" fill="currentColor" />
-                      </div>
-
-                      {/* Border glow */}
-                      <div className="absolute inset-0 border-2 border-white/30 rounded-xl"></div>
-                      <div className="absolute inset-0 border border-yellow-200/20 rounded-xl"></div>
-                    </div>
-
+                  {/* Face-down cards are .is-flipped: the flip utilities show the patterned back when flipped */}
+                  <span className={`flip-inner block ${card.isFlipped || card.isMatched ? '' : 'is-flipped'}`}>
                     {/* Card Front */}
-                    <div
-                      className="absolute inset-0 rounded-xl overflow-hidden shadow-2xl"
-                      style={{
-                        backfaceVisibility: 'hidden',
-                        transform: 'rotateY(180deg)'
-                      }}
+                    <span
+                      className={`flip-face overflow-hidden rounded-card bg-card shadow-rest ${
+                        card.isMatched ? 'ring-[3px] ring-gold' : 'ring-1 ring-black/5'
+                      }`}
                     >
-                      {/* Beautiful Image */}
                       {card.imageUrl ? (
-                        <div className="relative w-full h-full">
+                        <span className={`relative block h-full w-full ${card.isMatched ? 'opacity-60' : ''}`}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={card.imageUrl}
-                            alt={card.iconName}
-                            className="w-full h-full object-cover"
+                            alt=""
+                            className="h-full w-full object-cover"
                             onError={(e) => {
                               // Fallback to icon on image load error
                               e.currentTarget.style.display = 'none';
@@ -1535,108 +1523,148 @@ export default function JodaMemory() {
                             }}
                           />
                           {/* Fallback Icon Container (hidden by default) */}
-                          <div className="absolute inset-0 bg-gradient-to-br from-white via-gray-50 to-gray-100 items-center justify-center hidden">
-                            <div className="relative flex items-center justify-center">
-                              <div className={`absolute inset-0 bg-gradient-to-br ${card.color} rounded-full blur-2xl opacity-40 scale-150`}></div>
-                              <div className={`relative p-6 rounded-2xl bg-gradient-to-br ${card.color} shadow-xl`}>
-                                <card.Icon
-                                  className={`${
-                                    difficulty === 'hard'
-                                      ? 'w-12 h-12'
-                                      : difficulty === 'medium'
-                                      ? 'w-14 h-14'
-                                      : 'w-16 h-16'
-                                  } text-white drop-shadow-lg`}
-                                  strokeWidth={2}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                          {/* Subtle overlay for better card visibility */}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-black/10 pointer-events-none"></div>
-                          {/* Border glow */}
-                          <div className={`absolute inset-0 border-2 bg-gradient-to-br ${card.color} rounded-xl opacity-30`} style={{ WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)', WebkitMaskComposite: 'xor', maskComposite: 'exclude', padding: '2px' }}></div>
-                        </div>
-                      ) : (
-                        // Fallback to icon if no image URL
-                        <div className="relative w-full h-full bg-gradient-to-br from-white via-gray-50 to-gray-100 flex items-center justify-center">
-                          <div className="relative flex items-center justify-center">
-                            <div className={`absolute inset-0 bg-gradient-to-br ${card.color} rounded-full blur-2xl opacity-40 scale-150`}></div>
-                            <div className={`relative p-6 rounded-2xl bg-gradient-to-br ${card.color} shadow-xl`}>
+                          <span className="absolute inset-0 hidden items-center justify-center bg-card">
+                            <span className={`rounded-xl bg-gradient-to-br p-2.5 sm:p-3 ${card.color}`}>
                               <card.Icon
                                 className={`${
                                   difficulty === 'hard'
-                                    ? 'w-12 h-12'
+                                    ? 'h-7 w-7 md:h-8 md:w-8'
                                     : difficulty === 'medium'
-                                    ? 'w-14 h-14'
-                                    : 'w-16 h-16'
-                                } text-white drop-shadow-lg`}
+                                    ? 'h-8 w-8 md:h-10 md:w-10'
+                                    : 'h-10 w-10 md:h-12 md:w-12'
+                                } text-white`}
                                 strokeWidth={2}
+                                aria-hidden="true"
                               />
-                            </div>
-                          </div>
-                        </div>
+                            </span>
+                          </span>
+                        </span>
+                      ) : (
+                        // Fallback to icon if no image URL
+                        <span className={`flex h-full w-full items-center justify-center bg-card ${card.isMatched ? 'opacity-60' : ''}`}>
+                          <span className={`rounded-xl bg-gradient-to-br p-2.5 sm:p-3 ${card.color}`}>
+                            <card.Icon
+                              className={`${
+                                difficulty === 'hard'
+                                  ? 'h-7 w-7 md:h-8 md:w-8'
+                                  : difficulty === 'medium'
+                                  ? 'h-8 w-8 md:h-10 md:w-10'
+                                  : 'h-10 w-10 md:h-12 md:w-12'
+                              } text-white`}
+                              strokeWidth={2}
+                              aria-hidden="true"
+                            />
+                          </span>
+                        </span>
                       )}
-                    </div>
-                  </button>
-                </div>
+                    </span>
+
+                    {/* Card Back */}
+                    <span className="flip-face flip-face-back card-back rounded-card" aria-hidden="true" />
+                  </span>
+                </button>
               ))}
             </div>
 
-            <div className="text-center">
-              <button
-                onClick={handleRestart}
-                className="px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition-all hover:scale-105 flex items-center gap-2 mx-auto"
-              >
-                <RotateCcw className="w-5 h-5" />
-                Restart Game
-              </button>
+            {/* Game Controls */}
+            <div className="mx-auto mt-5 flex max-w-3xl flex-wrap items-center gap-2">
+              {gameStarted && !gameWon && (
+                <button
+                  onClick={() => {
+                    const newPausedState = !gamePaused;
+                    setGamePaused(newPausedState);
+
+                    // Sync pause state in multiplayer
+                    if (gameMode === 'multiplayer' && socketRef.current && roomId) {
+                      socketRef.current.emit('togglePause', {
+                        roomId,
+                        paused: newPausedState
+                      });
+                    }
+                  }}
+                  className="btn-quiet btn-sm min-h-11"
+                >
+                  {gamePaused ? <Play className="h-4 w-4" aria-hidden="true" /> : <Pause className="h-4 w-4" aria-hidden="true" />}
+                  {gamePaused ? 'Resume' : 'Pause'}
+                </button>
+              )}
+              {(gameMode !== 'multiplayer' || isHost) && (
+                <button
+                  onClick={handleRestart}
+                  className="btn-quiet btn-sm min-h-11"
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {gameMode === 'multiplayer' ? 'Deal again' : 'Restart'}
+                </button>
+              )}
+              {gameStarted && !gameWon && (
+                <>
+                  <button
+                    onClick={handleBackToMode}
+                    className="btn-quiet btn-sm min-h-11 sm:ml-auto"
+                  >
+                    <Home className="h-4 w-4" aria-hidden="true" />
+                    Menu
+                  </button>
+                  <button
+                    onClick={handleBackToMenu}
+                    className="btn-quiet btn-sm min-h-11"
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden="true" />
+                    Quit game
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
 
         {/* Instructions */}
-        <div className="mt-8 bg-white/10 backdrop-blur-sm rounded-lg p-6">
-          <h3 className="text-xl font-bold text-white mb-3">How to Play:</h3>
-          <ul className="text-white/80 space-y-2">
-            <li>🎯 Click on cards to flip them and reveal the emoji</li>
-            <li>🎮 Find matching pairs of emojis</li>
-            <li>🔄 Take turns with your opponent</li>
-            <li>⏱️ Complete the game in the shortest time possible</li>
-            <li>🏆 The player with the most pairs wins!</li>
-            <li>🔊 Enjoy the sound effects as you play!</li>
-          </ul>
-        </div>
-      </div>
+        {!gameStarted && (
+          <section aria-labelledby="memory-how-title" className="panel mt-10 max-w-2xl p-5 sm:p-6">
+            <h2 id="memory-how-title" className="title-md">How to play</h2>
+            <ul className="mt-3 list-disc space-y-1.5 pl-5 text-chalk marker:text-gold">
+              <li>Flip two cards per turn. If the pictures match, you keep the pair.</li>
+              <li>If they don&apos;t match, both cards turn face down again. Remember where they were.</li>
+              <li>Playing solo: clear the board in as little time and as few moves as you can.</li>
+              <li>With a friend: take turns. Most pairs wins the round, and the first to win 4 rounds wins the game.</li>
+            </ul>
+          </section>
+        )}
+      </main>
 
       {/* Invite Player Modal */}
       {showInviteModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-felt-deep/80 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="memory-invite-title"
+            className="panel relative w-full max-w-md p-6 shadow-lift"
+          >
             {/* Close button */}
             <button
               onClick={() => setShowInviteModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg p-2 transition"
+              aria-label="Close"
+              className="absolute right-3 top-3 inline-flex h-11 w-11 items-center justify-center rounded-lg text-chalk transition hover:bg-white/10 hover:text-white"
             >
-              <X className="w-6 h-6" />
+              <X className="h-5 w-5" aria-hidden="true" />
             </button>
 
-            <div className="text-center mb-6">
-              <div className="mb-4 flex justify-center">
-                <Users className="w-20 h-20 text-purple-500" strokeWidth={1.5} />
-              </div>
-              <h2 className="text-3xl font-bold text-gray-800 mb-2">Invite Player</h2>
-              <p className="text-gray-600">Share this link with your friend to play together!</p>
+            <div className="mb-5 pr-10">
+              <h2 id="memory-invite-title" className="title-md">Invite a friend</h2>
+              <p className="mt-1 text-chalk">Send this link to a friend so they can join your game.</p>
             </div>
 
-            <div className="bg-gray-100 rounded-lg p-4 mb-4">
-              <p className="text-sm text-gray-600 mb-2">Game Link:</p>
+            <div className="mb-4">
+              <label htmlFor="memory-invite-link" className="field-label">Game link</label>
               <div className="flex items-center gap-2">
                 <input
+                  id="memory-invite-link"
                   type="text"
                   readOnly
                   value={typeof window !== 'undefined' ? `${window.location.href}?gameId=placeholder123` : 'Loading...'}
-                  className="flex-1 bg-white px-4 py-3 rounded-lg text-gray-800 border border-gray-300 text-sm"
+                  className="field min-w-0 flex-1 text-sm"
                   onClick={(e) => e.currentTarget.select()}
                 />
                 <button
@@ -1655,20 +1683,20 @@ export default function JodaMemory() {
                       }, 2000);
                     }
                   }}
-                  className="px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition flex-shrink-0"
+                  className="btn-quiet shrink-0"
                 >
-                  📋 Copy
+                  Copy link
                 </button>
               </div>
             </div>
 
-            <div className="text-sm text-gray-500 mb-6">
-              <p>💡 <strong>Note:</strong> Once your friend opens this link, they'll join your game and you can start playing together!</p>
-            </div>
+            <p className="mb-6 text-sm text-chalk">
+              When your friend opens the link, they join your game and you can start playing together.
+            </p>
 
             <button
               onClick={() => setShowInviteModal(false)}
-              className="w-full px-6 py-3 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition"
+              className="btn-quiet w-full"
             >
               Close
             </button>
@@ -1681,37 +1709,38 @@ export default function JodaMemory() {
         <div className="fixed bottom-4 right-4 z-50">
           {showChat ? (
             /* Expanded Chat Window */
-            <div className="bg-white/10 backdrop-blur-md border-2 border-purple-400/40 rounded-2xl shadow-2xl w-80 h-96 flex flex-col">
+            <div className="panel flex h-96 w-[calc(100vw-2rem)] max-w-xs flex-col shadow-lift">
               {/* Chat Header */}
-              <div className="flex items-center justify-between p-4 border-b border-white/20">
+              <div className="flex items-center justify-between border-b border-white/10 py-1 pl-4 pr-1">
                 <div className="flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5 text-purple-300" />
-                  <h3 className="text-white font-semibold">Chat</h3>
+                  <MessageSquare className="h-5 w-5 text-chalk" aria-hidden="true" />
+                  <h3 className="font-semibold">Chat</h3>
                 </div>
                 <button
                   onClick={() => setShowChat(false)}
-                  className="p-1 hover:bg-white/10 rounded transition-colors"
+                  aria-label="Close chat"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-chalk transition hover:bg-white/10 hover:text-white"
                 >
-                  <X className="w-5 h-5 text-white" />
+                  <X className="h-5 w-5" aria-hidden="true" />
                 </button>
               </div>
 
               {/* Messages List */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              <div className="flex-1 space-y-2 overflow-y-auto p-4" aria-live="polite">
                 {chatMessages.length === 0 ? (
-                  <p className="text-white/50 text-sm text-center">No messages yet...</p>
+                  <p className="text-sm text-chalk">No messages yet. Say hi.</p>
                 ) : (
                   chatMessages.map((msg, index) => (
                     <div
                       key={index}
                       className={`flex ${msg.playerId === socketRef.current?.id ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className={`max-w-[70%] rounded-lg p-2 ${
+                      <div className={`max-w-[75%] rounded-xl px-3 py-2 ${
                         msg.playerId === socketRef.current?.id
-                          ? 'bg-purple-500/30 text-white'
-                          : 'bg-white/20 text-white'
+                          ? 'bg-table-rim text-white'
+                          : 'bg-felt-deep text-white'
                       }`}>
-                        <p className="text-xs font-semibold mb-1">{msg.playerName}</p>
+                        <p className="mb-0.5 text-xs font-semibold text-chalk">{msg.playerName}</p>
                         <p className="text-sm">{msg.message}</p>
                       </div>
                     </div>
@@ -1720,23 +1749,25 @@ export default function JodaMemory() {
               </div>
 
               {/* Message Input */}
-              <div className="p-4 border-t border-white/20">
+              <div className="border-t border-white/10 p-3">
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Type a message..."
-                    className="flex-1 px-3 py-2 bg-white/10 text-white placeholder-white/50 rounded-lg border border-white/20 focus:outline-none focus:border-purple-400"
+                    placeholder="Type a message"
+                    aria-label="Message"
+                    className="field min-w-0 flex-1 px-3 py-2"
                     maxLength={200}
                   />
                   <button
                     onClick={handleSendMessage}
                     disabled={!chatInput.trim()}
-                    className="px-4 py-2 bg-purple-500/30 hover:bg-purple-500/40 disabled:bg-white/10 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                    aria-label="Send message"
+                    className="btn-quiet btn-sm min-h-11 shrink-0"
                   >
-                    <Send className="w-5 h-5" />
+                    <Send className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -1745,11 +1776,12 @@ export default function JodaMemory() {
             /* Minimized Chat Button */
             <button
               onClick={() => setShowChat(true)}
-              className="bg-purple-500/30 hover:bg-purple-500/40 backdrop-blur-md border-2 border-purple-400/40 rounded-full p-4 shadow-lg transition-all hover:scale-110"
+              aria-label={chatMessages.length > 0 ? `Open chat, ${chatMessages.length} messages` : 'Open chat'}
+              className="relative inline-flex h-14 w-14 items-center justify-center rounded-full bg-table text-white shadow-lift ring-1 ring-inset ring-table-rim transition hover:bg-table-rim"
             >
-              <MessageSquare className="w-6 h-6 text-white" />
+              <MessageSquare className="h-6 w-6" aria-hidden="true" />
               {chatMessages.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-signal px-1 text-xs font-bold text-ink">
                   {chatMessages.length}
                 </span>
               )}
@@ -1757,6 +1789,26 @@ export default function JodaMemory() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Only the host can deal the next round; the other player waits for the deal to arrive
+function NextRoundActions({ isHost, onNextRound, onLeave }: { isHost: boolean; onNextRound: () => void; onLeave: () => void }) {
+  return (
+    <div className="mt-6 flex flex-col gap-2">
+      {isHost ? (
+        <button type="button" onClick={onNextRound} className="btn-gold" autoFocus>
+          Next round
+        </button>
+      ) : (
+        <p className="text-center text-sm text-chalk" aria-live="polite">
+          Waiting for the host to deal the next round…
+        </p>
+      )}
+      <button type="button" onClick={onLeave} className="btn-quiet" autoFocus={!isHost}>
+        Leave game
+      </button>
     </div>
   );
 }

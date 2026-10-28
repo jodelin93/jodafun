@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Volume, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { getSoundManager } from '../lib/sounds/soundManager';
 
 export default function SoundControls() {
@@ -35,19 +36,28 @@ export default function SoundControls() {
   }
 
   return (
-    <div className="flex items-center gap-4 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2">
+    <div className="flex items-center gap-1.5">
       {/* Mute/Unmute Button */}
       <button
+        type="button"
         onClick={handleMuteToggle}
-        className="text-2xl hover:scale-110 transition-transform"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-chalk transition hover:bg-white/10 hover:text-white"
         title={muted ? 'Unmute' : 'Mute'}
         aria-label={muted ? 'Unmute' : 'Mute'}
       >
-        {muted ? '🔇' : volume > 0.5 ? '🔊' : volume > 0 ? '🔉' : '🔈'}
+        {muted ? (
+          <VolumeX className="h-5 w-5" aria-hidden="true" />
+        ) : volume > 0.5 ? (
+          <Volume2 className="h-5 w-5" aria-hidden="true" />
+        ) : volume > 0 ? (
+          <Volume1 className="h-5 w-5" aria-hidden="true" />
+        ) : (
+          <Volume className="h-5 w-5" aria-hidden="true" />
+        )}
       </button>
 
-      {/* Volume Slider */}
-      <div className="flex items-center gap-2">
+      {/* Volume Slider: hidden on phones to keep the game bar on one line */}
+      <div className="hidden items-center gap-2 sm:flex">
         <input
           type="range"
           min="0"
@@ -56,27 +66,10 @@ export default function SoundControls() {
           value={volume}
           onChange={handleVolumeChange}
           disabled={muted}
-          className="w-24 h-2 bg-white/20 rounded-lg appearance-none cursor-pointer
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     [&::-webkit-slider-thumb]:appearance-none
-                     [&::-webkit-slider-thumb]:w-4
-                     [&::-webkit-slider-thumb]:h-4
-                     [&::-webkit-slider-thumb]:rounded-full
-                     [&::-webkit-slider-thumb]:bg-white
-                     [&::-webkit-slider-thumb]:cursor-pointer
-                     [&::-webkit-slider-thumb]:hover:scale-110
-                     [&::-webkit-slider-thumb]:transition-transform
-                     [&::-moz-range-thumb]:w-4
-                     [&::-moz-range-thumb]:h-4
-                     [&::-moz-range-thumb]:rounded-full
-                     [&::-moz-range-thumb]:bg-white
-                     [&::-moz-range-thumb]:border-0
-                     [&::-moz-range-thumb]:cursor-pointer
-                     [&::-moz-range-thumb]:hover:scale-110
-                     [&::-moz-range-thumb]:transition-transform"
+          className="h-2 w-20 cursor-pointer accent-gold disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Volume"
         />
-        <span className="text-sm font-medium min-w-[3ch] text-right">
+        <span className="min-w-[4ch] text-right text-sm tabular-nums text-chalk">
           {Math.round(volume * 100)}%
         </span>
       </div>
