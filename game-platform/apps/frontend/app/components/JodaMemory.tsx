@@ -10,6 +10,7 @@ import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
+import ShareRoomButton from './ShareRoomButton';
 import LanguageSwitcher from '../i18n/LanguageSwitcher';
 import { useT } from '../i18n/I18nProvider';
 import { gameMessages } from '../i18n/messages/game';
@@ -1782,14 +1783,21 @@ export default function JodaMemory() {
                 <p className="text-sm text-chalk">{t('roomCode')}</p>
                 <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
                   <span className="break-all font-display text-2xl font-extrabold sm:text-3xl">{roomId}</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyRoomLink}
-                    className="btn-quiet btn-sm min-h-11"
-                  >
-                    {copiedLink ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-                    {copiedLink ? t('copied') : t('copyLink')}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ShareRoomButton
+                      url={`${typeof window !== 'undefined' ? window.location.origin : ''}/games/joda-memory?roomId=${roomId}`}
+                      code={roomId ?? ''}
+                      onCopy={handleCopyRoomLink}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyRoomLink}
+                      className="btn-quiet btn-sm min-h-11"
+                    >
+                      {copiedLink ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+                      {copiedLink ? t('copied') : t('copyLink')}
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-3 text-sm text-chalk" aria-live="polite">
                   {copiedLink ? t('copiedHint') : t('copyHint')}
