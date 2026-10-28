@@ -286,7 +286,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       flippedCards: [],
       currentRound: 1,
       roundWins: [0, 0],
-      showOpponentMoves: true, // Default to showing moves
+      showOpponentMoves: false, // The other player's flips stay hidden unless the host turns this on
       gameActive: false,
       roundActive: false,
       gameHasFlips: false,

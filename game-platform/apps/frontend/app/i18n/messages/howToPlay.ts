@@ -38,7 +38,7 @@ export const howToPlayMessages = defineMessages({
     rounds5: 'After each round, the host deals the next one.',
 
     optionsTitle: 'Room options',
-    options1: '"Show cards on their turn" is a host setting in the room. When it is off, you can\'t see the cards the other player flips.',
+    options1: '"Show cards on their turn" is a host setting in the room. It starts off, so you can\'t see the cards the other player flips; the host can turn it on in the lobby.',
     options2: '"Pause" stops the timer for both players. Only the player who paused can resume, and nobody can flip a card while the game is paused.',
 
     leavingTitle: 'Leaving and coming back',
@@ -91,7 +91,7 @@ export const howToPlayMessages = defineMessages({
     rounds5: 'Après chaque manche, l’hôte distribue la suivante.',
 
     optionsTitle: 'Options de la salle',
-    options1: '« Montrer les cartes pendant son tour » est un réglage de l’hôte dans la salle. S’il est désactivé, vous ne voyez pas les cartes que l’autre joueur retourne.',
+    options1: '« Montrer les cartes pendant son tour » est un réglage de l’hôte dans la salle. Il est désactivé par défaut : vous ne voyez pas les cartes que l’autre joueur retourne. L’hôte peut l’activer dans la salle d’attente.',
     options2: '« Pause » arrête le chrono pour les deux joueurs. Seul le joueur qui a mis en pause peut reprendre, et personne ne peut retourner de carte pendant la pause.',
 
     leavingTitle: 'Partir et revenir',
@@ -144,7 +144,7 @@ export const howToPlayMessages = defineMessages({
     rounds5: 'Apre chak wonn, mèt chanm nan bay kat pwochen wonn lan.',
 
     optionsTitle: 'Opsyon chanm lan',
-    options1: '"Montre kat yo lè se tou pa l" se yon reglaj mèt chanm nan chwazi nan chanm lan. Lè l etenn, ou pa ka wè kat lòt jwè a vire.',
+    options1: '"Montre kat yo lè se tou pa l" se yon reglaj mèt chanm nan chwazi nan chanm lan. Li etenn depi nan kòmansman, kidonk ou pa ka wè kat lòt jwè a vire. Mèt chanm nan ka limen l anvan jwèt la kòmanse.',
     options2: '"Pòz" kanpe kwonomèt la pou de jwè yo. Se sèlman jwè ki mete l an pòz la ki ka fè l kontinye, epi pèsonn pa ka vire kat pandan jwèt la an pòz.',
 
     leavingTitle: 'Kite epi tounen',
@@ -197,7 +197,7 @@ export const howToPlayMessages = defineMessages({
     rounds5: 'Después de cada ronda, el anfitrión reparte la siguiente.',
 
     optionsTitle: 'Opciones de la sala',
-    options1: '"Mostrar las cartas en su turno" es un ajuste del anfitrión en la sala. Si está desactivado, no puedes ver las cartas que voltea el otro jugador.',
+    options1: '"Mostrar las cartas en su turno" es un ajuste del anfitrión en la sala. Viene desactivado, así que no ves las cartas que voltea el otro jugador; el anfitrión puede activarlo en la sala de espera.',
     options2: '"Pausa" detiene el cronómetro para los dos jugadores. Solo quien pausó puede reanudar, y nadie puede voltear cartas mientras la partida está en pausa.',
 
     leavingTitle: 'Salir y volver',

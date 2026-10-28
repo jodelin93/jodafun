@@ -172,7 +172,7 @@ export default function JodaMemory() {
   const [roundWinner, setRoundWinner] = useState<number | null>(null);
   const [overallWinner, setOverallWinner] = useState<number | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [showOpponentMoves, setShowOpponentMoves] = useState(true);
+  const [showOpponentMoves, setShowOpponentMoves] = useState(false);
 
   // Chat states
   const [chatMessages, setChatMessages] = useState<Array<{playerName: string; playerId: string; message: string; timestamp: string}>>([]);
