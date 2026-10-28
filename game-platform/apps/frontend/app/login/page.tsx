@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient, continueAsGuest } from '../lib/auth-client';
+import SiteHeader from '../components/ui/SiteHeader';
+import PlayingCard from '../components/ui/PlayingCard';
+import { AlertCircle, Brain } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,13 +28,13 @@ export default function LoginPage() {
       });
 
       if (result.error) {
-        setError(result.error.message || 'Login failed');
+        setError(result.error.message || "Couldn't sign in. Check your email and password.");
       } else {
         // Redirect to home or dashboard
         router.push('/');
       }
     } catch (err) {
-      setError('An unexpected error occurred');
+      setError('Something went wrong. Try again in a moment.');
       console.error('Login error:', err);
     } finally {
       setLoading(false);
@@ -46,7 +49,7 @@ export default function LoginPage() {
       await continueAsGuest();
       router.push('/');
     } catch (err) {
-      setError('Failed to continue as guest');
+      setError("Couldn't start a guest session. Check your connection and try again.");
       console.error('Guest login error:', err);
     } finally {
       setGuestLoading(false);
@@ -54,100 +57,86 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Welcome Back
-            </h1>
-            <p className="text-gray-600">Sign in to continue playing</p>
-          </div>
+    <>
+      <SiteHeader />
+      <main className="page py-8 sm:py-12">
+        <div className="grid items-center gap-12 lg:grid-cols-2">
+          <div className="panel mx-auto w-full max-w-md p-6 sm:p-8 lg:mx-0">
+            <h1 className="title-lg">Sign in</h1>
+            <p className="mt-2 text-chalk">Pick up where you left off.</p>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-                {error}
+            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+              {error && (
+                <div role="alert" className="flex items-start gap-3 rounded-xl bg-signal/10 px-4 py-3 text-white ring-1 ring-inset ring-signal">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-signal" aria-hidden="true" />
+                  <p className="font-medium">{error}</p>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="email" className="field-label">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="field"
+                  placeholder="you@example.com"
+                />
               </div>
-            )}
+              <div>
+                <label htmlFor="password" className="field-label">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="field"
+                  placeholder="Your password"
+                />
+              </div>
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition"
-                placeholder="you@example.com"
-              />
-            </div>
+              <button type="submit" disabled={loading} className="btn-gold w-full">
+                {loading ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
 
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition"
-                placeholder="Enter your password"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-gray-600">
-              Don't have an account?{' '}
-              <Link
-                href="/signup"
-                className="text-indigo-600 font-medium hover:text-indigo-700"
-              >
-                Sign up
+            <p className="mt-6 text-chalk">
+              New here?{' '}
+              <Link href="/signup" className="font-semibold text-white underline underline-offset-4 hover:text-gold">
+                Create an account
               </Link>
             </p>
-          </div>
-
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or</span>
-              </div>
-            </div>
-
+          <div className="mt-6 border-t border-table-rim pt-6">
             <button
+              type="button"
               onClick={handleGuestContinue}
               disabled={guestLoading || loading}
-              className="mt-4 w-full bg-white border-2 border-gray-300 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className="btn-quiet w-full"
             >
-              {guestLoading ? 'Creating guest account...' : 'Continue as Guest'}
+              {guestLoading ? 'Setting up your guest account…' : 'Play as a guest'}
             </button>
           </div>
+          </div>
+
+          <aside className="hidden lg:block" aria-hidden="true">
+            <div className="relative mx-auto h-72 w-80">
+              <PlayingCard faceUp={false} className="absolute left-2 top-8 h-56 w-40 -rotate-12" />
+              <PlayingCard faceUp={false} className="absolute right-2 top-8 h-56 w-40 rotate-12" />
+              <PlayingCard faceUp className="absolute left-1/2 top-2 h-56 w-40 -translate-x-1/2">
+                <div className="flex h-full items-center justify-center">
+                  <Brain className="h-16 w-16 text-ink" strokeWidth={1.5} />
+                </div>
+              </PlayingCard>
+            </div>
+            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">Your scores and recent games are waiting at the table.</p>
+          </aside>
         </div>
-      </div>
-    </div>
+      </main>
+    </>
   );
 }

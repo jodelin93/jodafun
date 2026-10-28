@@ -1,31 +1,31 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '../contexts/AuthContext';
 import Link from 'next/link';
-import { Trophy, Medal, Crown, TrendingUp, Filter, Calendar } from 'lucide-react';
+import { Medal } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import SiteHeader from '../components/ui/SiteHeader';
+import SiteFooter from '../components/ui/SiteFooter';
+import Loading from '../components/ui/Loading';
+
+const MEDAL_RING = {
+  1: 'ring-[#FFC23D]',
+  2: 'ring-[#C9D1D3]',
+  3: 'ring-[#D08A52]',
+} as const;
+
+const MEDAL_ICON = {
+  1: 'text-[#B9800A]',
+  2: 'text-[#6B7678]',
+  3: 'text-[#A8602B]',
+} as const;
+
+const MEDAL_NAME = { 1: '1st place', 2: '2nd place', 3: '3rd place' } as const;
 
 export default function LeaderboardPage() {
-  const router = useRouter();
   const { user, isPending } = useAuth();
   const [selectedGame, setSelectedGame] = useState('all');
   const [timeFrame, setTimeFrame] = useState<'daily' | 'weekly' | 'monthly' | 'all-time'>('all-time');
-
-  // Show loading state
-  if (isPending) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-        <div className="text-center">
-          <div className="relative w-16 h-16 mx-auto mb-4">
-            <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-            <div className="absolute top-2 left-2 w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" style={{animationDirection: 'reverse', animationDuration: '1s'}}></div>
-          </div>
-          <p className="text-gray-300 text-lg">Loading...</p>
-        </div>
-      </div>
-    );
-  }
 
   // Mock leaderboard data - will be replaced with real data from backend
   const mockLeaderboard = [
@@ -36,7 +36,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 234,
       winRate: 87.5,
       streak: 12,
-      avatar: '🏆',
     },
     {
       rank: 2,
@@ -45,7 +44,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 198,
       winRate: 84.2,
       streak: 8,
-      avatar: '🧠',
     },
     {
       rank: 3,
@@ -54,7 +52,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 176,
       winRate: 81.8,
       streak: 15,
-      avatar: '⚡',
     },
     {
       rank: 4,
@@ -63,7 +60,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 165,
       winRate: 78.9,
       streak: 5,
-      avatar: '🃏',
     },
     {
       rank: 5,
@@ -72,7 +68,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 153,
       winRate: 76.5,
       streak: 7,
-      avatar: '📚',
     },
     {
       rank: 6,
@@ -81,7 +76,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 142,
       winRate: 74.1,
       streak: 3,
-      avatar: '🎯',
     },
     {
       rank: 7,
@@ -90,7 +84,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 138,
       winRate: 72.3,
       streak: 6,
-      avatar: '💡',
     },
     {
       rank: 8,
@@ -99,7 +92,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 129,
       winRate: 70.5,
       streak: 4,
-      avatar: '👑',
     },
     {
       rank: 9,
@@ -108,7 +100,6 @@ export default function LeaderboardPage() {
       gamesPlayed: 121,
       winRate: 68.2,
       streak: 2,
-      avatar: '🥷',
     },
     {
       rank: 10,
@@ -117,343 +108,149 @@ export default function LeaderboardPage() {
       gamesPlayed: 115,
       winRate: 66.7,
       streak: 5,
-      avatar: '🧩',
     },
   ];
 
   const games = [
-    { id: 'all', name: 'All Games' },
+    { id: 'all', name: 'All games' },
     { id: 'joda-memory', name: 'Joda Memory' },
   ];
 
-  const getRankBadge = (rank: number) => {
-    if (rank === 1) {
-      return (
-        <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full flex items-center justify-center shadow-lg shadow-yellow-500/50">
-          <Crown className="w-7 h-7 text-white" />
-        </div>
-      );
-    } else if (rank === 2) {
-      return (
-        <div className="w-12 h-12 bg-gradient-to-br from-gray-300 to-gray-500 rounded-full flex items-center justify-center shadow-lg shadow-gray-400/50">
-          <Medal className="w-7 h-7 text-white" />
-        </div>
-      );
-    } else if (rank === 3) {
-      return (
-        <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-lg shadow-orange-500/50">
-          <Medal className="w-7 h-7 text-white" />
-        </div>
-      );
-    }
+  const podium = (rank: 1 | 2 | 3) => {
+    const player = mockLeaderboard[rank - 1]!;
     return (
-      <div className="w-12 h-12 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full flex items-center justify-center text-xl font-bold text-white">
-        {rank}
-      </div>
+      <li
+        key={rank}
+        className={`flex flex-col items-center rounded-card bg-card p-5 text-center text-ink shadow-rest ring-4 ${MEDAL_RING[rank]} ${
+          rank === 1 ? 'sm:order-2 sm:py-10' : rank === 2 ? 'sm:order-1' : 'sm:order-3'
+        }`}
+      >
+        <Medal className={`h-8 w-8 ${MEDAL_ICON[rank]}`} aria-hidden="true" />
+        <p className="mt-1 text-sm font-semibold text-ink-soft">{MEDAL_NAME[rank]}</p>
+        <h3 className="title-md mt-2 break-words">{player.name}</h3>
+        <p className="mt-2 font-display text-3xl font-extrabold">{player.score.toLocaleString()}</p>
+        <p className="text-sm text-ink-soft">points</p>
+        {rank === 1 && <p className="mt-3 text-sm text-ink-soft">{player.streak} win streak</p>}
+      </li>
     );
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-      {/* Navigation */}
-      <nav className="fixed top-0 w-full bg-black/40 backdrop-blur-md border-b border-white/10 z-50">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-8">
-              <Link href="/" className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center font-bold text-xl">
-                  J
-                </div>
-                <span className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                  Jodafun
-                </span>
-              </Link>
-              <div className="hidden md:flex gap-6">
-                <Link href="/" className="text-gray-400 hover:text-white transition">
-                  Home
-                </Link>
-                <Link href="/games" className="text-gray-400 hover:text-white transition">
-                  Games
-                </Link>
-                <Link href="/leaderboard" className="text-white font-semibold hover:text-purple-400 transition">
-                  Leaderboard
-                </Link>
-              </div>
-            </div>
+    <div className="flex min-h-screen flex-col">
+      <SiteHeader />
+      <main className="page flex-1 py-8 sm:py-12">
+        {isPending ? (
+          <Loading />
+        ) : (
+          <>
+            <h1 className="title-lg">Leaderboard</h1>
+            <p className="mt-2 max-w-xl text-chalk">
+              Sample rankings for now. Real scores will show here once games save results.
+            </p>
 
-            <div className="flex items-center gap-4">
-              {user ? (
-                <>
-                  <div className="flex items-center gap-3 px-4 py-2 bg-white/5 backdrop-blur-sm border border-white/10 rounded-lg">
-                    <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center font-semibold">
-                      {user.name.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="text-sm font-medium">{user.name}</span>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/sign-out`, {
-                        method: 'POST',
-                        credentials: 'include',
-                      });
-                      router.push('/login');
-                    }}
-                    className="px-4 py-2 text-sm text-gray-300 hover:text-white border border-white/20 rounded-lg hover:bg-white/10 transition"
-                  >
-                    Sign Out
-                  </button>
-                </>
-              ) : (
-                <>
-                  <Link
-                    href="/login"
-                    className="px-6 py-2 text-gray-300 hover:text-white transition font-medium"
-                  >
-                    Sign In
-                  </Link>
-                  <Link
-                    href="/signup"
-                    className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg font-semibold hover:from-purple-500 hover:to-blue-500 transition shadow-lg hover:shadow-purple-500/50"
-                  >
-                    Get Started
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <div className="container mx-auto px-6 pt-32 pb-20">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <Trophy className="w-12 h-12 text-yellow-400" />
-            <h1 className="text-6xl font-black bg-gradient-to-r from-yellow-400 via-orange-400 to-red-400 bg-clip-text text-transparent">
-              Leaderboard
-            </h1>
-            <Trophy className="w-12 h-12 text-yellow-400" />
-          </div>
-          <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-            Compete with players worldwide and climb to the top!
-          </p>
-        </div>
-
-        {/* Filters */}
-        <div className="max-w-4xl mx-auto mb-12">
-          <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Game Filter */}
+            <div className="panel mt-6 grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
               <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-gray-300 mb-3">
-                  <Filter className="w-4 h-4" />
+                <label htmlFor="lb-game" className="field-label">
                   Game
                 </label>
                 <select
+                  id="lb-game"
                   value={selectedGame}
                   onChange={(e) => setSelectedGame(e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:border-purple-500 transition"
+                  className="field"
                 >
                   {games.map((game) => (
-                    <option key={game.id} value={game.id} className="bg-slate-800">
+                    <option key={game.id} value={game.id}>
                       {game.name}
                     </option>
                   ))}
                 </select>
               </div>
-
-              {/* Time Frame Filter */}
-              <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-gray-300 mb-3">
-                  <Calendar className="w-4 h-4" />
-                  Time Frame
-                </label>
-                <div className="grid grid-cols-4 gap-2">
+              <div role="group" aria-labelledby="lb-time">
+                <span id="lb-time" className="field-label">
+                  Time frame
+                </span>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {(['daily', 'weekly', 'monthly', 'all-time'] as const).map((frame) => (
                     <button
                       key={frame}
+                      type="button"
                       onClick={() => setTimeFrame(frame)}
-                      className={`px-3 py-2 rounded-lg text-sm font-semibold transition ${
+                      aria-pressed={timeFrame === frame}
+                      className={`btn btn-sm min-h-[44px] ring-1 ring-inset ${
                         timeFrame === frame
-                          ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
-                          : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                          ? 'bg-white text-ink ring-white'
+                          : 'bg-white/5 text-white ring-white/20 hover:bg-white/10'
                       }`}
                     >
-                      {frame === 'all-time' ? 'All Time' : frame.charAt(0).toUpperCase() + frame.slice(1)}
+                      {frame === 'all-time' ? 'All time' : frame.charAt(0).toUpperCase() + frame.slice(1)}
                     </button>
                   ))}
                 </div>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Top 3 Podium */}
-        <div className="max-w-5xl mx-auto mb-16">
-          <div className="grid grid-cols-3 gap-6 items-end">
-            {/* 2nd Place */}
-            <div className="transform translate-y-8">
-              <div className="bg-gradient-to-br from-gray-300/20 to-gray-500/20 backdrop-blur-sm border-2 border-gray-400/40 rounded-2xl p-6 text-center">
-                <div className="flex justify-center mb-4">
-                  {getRankBadge(2)}
-                </div>
-                <div className="text-4xl mb-3">{mockLeaderboard[1]!.avatar}</div>
-                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[1]!.name}</h3>
-                <div className="text-3xl font-black text-gray-300 mb-1">{mockLeaderboard[1]!.score.toLocaleString()}</div>
-                <p className="text-sm text-gray-400">points</p>
+            <ol className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3 sm:items-end" aria-label="Top three players">
+              {podium(1)}
+              {podium(2)}
+              {podium(3)}
+            </ol>
+
+            <div className="panel mt-8 overflow-hidden">
+              <div className="grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 border-b border-table-rim px-4 py-3 text-sm text-chalk sm:grid-cols-[3rem_1fr_6rem_5rem_5rem_4rem] sm:px-5">
+                <div>Rank</div>
+                <div>Player</div>
+                <div className="text-right">Score</div>
+                <div className="hidden text-right sm:block">Games</div>
+                <div className="hidden text-right sm:block">Win rate</div>
+                <div className="hidden text-right sm:block">Streak</div>
               </div>
-            </div>
-
-            {/* 1st Place */}
-            <div className="transform -translate-y-4">
-              <div className="bg-gradient-to-br from-yellow-400/20 to-yellow-600/20 backdrop-blur-sm border-2 border-yellow-400/60 rounded-2xl p-8 text-center relative">
-                <div className="absolute -top-6 left-1/2 -translate-x-1/2">
-                  <div className="bg-gradient-to-r from-yellow-400 to-yellow-600 px-4 py-2 rounded-full text-sm font-bold text-white shadow-lg shadow-yellow-500/50">
-                    👑 CHAMPION
-                  </div>
-                </div>
-                <div className="flex justify-center mb-4 mt-4">
-                  {getRankBadge(1)}
-                </div>
-                <div className="text-5xl mb-4">{mockLeaderboard[0]!.avatar}</div>
-                <h3 className="text-2xl font-bold text-white mb-3">{mockLeaderboard[0]!.name}</h3>
-                <div className="text-4xl font-black text-yellow-300 mb-1">{mockLeaderboard[0]!.score.toLocaleString()}</div>
-                <p className="text-sm text-gray-300">points</p>
-                <div className="mt-4 pt-4 border-t border-yellow-400/30">
-                  <div className="flex items-center justify-center gap-2 text-sm">
-                    <TrendingUp className="w-4 h-4 text-green-400" />
-                    <span className="text-green-400 font-semibold">{mockLeaderboard[0]!.streak} win streak</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* 3rd Place */}
-            <div className="transform translate-y-8">
-              <div className="bg-gradient-to-br from-orange-400/20 to-orange-600/20 backdrop-blur-sm border-2 border-orange-400/40 rounded-2xl p-6 text-center">
-                <div className="flex justify-center mb-4">
-                  {getRankBadge(3)}
-                </div>
-                <div className="text-4xl mb-3">{mockLeaderboard[2]!.avatar}</div>
-                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[2]!.name}</h3>
-                <div className="text-3xl font-black text-orange-300 mb-1">{mockLeaderboard[2]!.score.toLocaleString()}</div>
-                <p className="text-sm text-gray-400">points</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Full Leaderboard */}
-        <div className="max-w-5xl mx-auto">
-          <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl overflow-hidden">
-            {/* Table Header */}
-            <div className="bg-white/5 border-b border-white/20 px-6 py-4">
-              <div className="grid grid-cols-12 gap-4 text-sm font-semibold text-gray-300">
-                <div className="col-span-1">Rank</div>
-                <div className="col-span-4">Player</div>
-                <div className="col-span-2 text-center">Score</div>
-                <div className="col-span-2 text-center">Games</div>
-                <div className="col-span-2 text-center">Win Rate</div>
-                <div className="col-span-1 text-center">Streak</div>
-              </div>
-            </div>
-
-            {/* Table Body */}
-            <div className="divide-y divide-white/10">
-              {mockLeaderboard.map((player, index) => (
-                <div
-                  key={player.rank}
-                  className={`px-6 py-4 hover:bg-white/5 transition ${
-                    user && player.name === user.name ? 'bg-purple-500/10' : ''
-                  }`}
-                >
-                  <div className="grid grid-cols-12 gap-4 items-center">
-                    {/* Rank */}
-                    <div className="col-span-1">
-                      {getRankBadge(player.rank)}
-                    </div>
-
-                    {/* Player */}
-                    <div className="col-span-4 flex items-center gap-3">
-                      <div className="text-3xl">{player.avatar}</div>
-                      <div>
-                        <div className="font-bold text-white flex items-center gap-2">
-                          {player.name}
-                          {user && player.name === user.name && (
-                            <span className="px-2 py-0.5 bg-purple-500/30 border border-purple-400/40 rounded text-xs text-purple-300">
-                              You
-                            </span>
-                          )}
-                        </div>
+              <ul className="divide-y divide-table-rim">
+                {mockLeaderboard.map((player) => {
+                  const isYou = !!user && player.name === user.name;
+                  return (
+                    <li
+                      key={player.rank}
+                      className={`grid grid-cols-[2.5rem_1fr_auto] items-center gap-3 px-4 py-3 sm:grid-cols-[3rem_1fr_6rem_5rem_5rem_4rem] sm:px-5 ${
+                        isYou ? 'bg-white/10' : ''
+                      }`}
+                    >
+                      <div className="font-display text-lg font-bold">{player.rank}</div>
+                      <div className="min-w-0">
+                        <span className="break-words font-semibold">{player.name}</span>
+                        {isYou && <span className="chip ml-2 px-2 py-0.5 text-xs">You</span>}
+                        <p className="text-xs text-chalk sm:hidden">
+                          {player.gamesPlayed} games, {player.winRate}% wins
+                        </p>
                       </div>
-                    </div>
+                      <div className="text-right font-semibold">{player.score.toLocaleString()}</div>
+                      <div className="hidden text-right sm:block">{player.gamesPlayed}</div>
+                      <div className="hidden text-right sm:block">{player.winRate}%</div>
+                      <div className="hidden text-right sm:block">{player.streak}</div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
 
-                    {/* Score */}
-                    <div className="col-span-2 text-center">
-                      <div className="text-xl font-bold text-white">{player.score.toLocaleString()}</div>
-                      <div className="text-xs text-gray-400">points</div>
-                    </div>
-
-                    {/* Games Played */}
-                    <div className="col-span-2 text-center">
-                      <div className="text-lg font-semibold text-white">{player.gamesPlayed}</div>
-                      <div className="text-xs text-gray-400">played</div>
-                    </div>
-
-                    {/* Win Rate */}
-                    <div className="col-span-2 text-center">
-                      <div className="text-lg font-semibold text-green-400">{player.winRate}%</div>
-                      <div className="text-xs text-gray-400">win rate</div>
-                    </div>
-
-                    {/* Streak */}
-                    <div className="col-span-1 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className="text-lg font-bold text-orange-400">{player.streak}</span>
-                        <span className="text-xs text-gray-400">🔥</span>
-                      </div>
-                    </div>
-                  </div>
+            {!user && (
+              <div className="panel mt-8 max-w-xl p-5 sm:p-6">
+                <h2 className="title-md">Save your scores</h2>
+                <p className="mt-2 text-chalk">Create an account to keep your results and show up here later.</p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <Link href="/signup" className="btn-quiet">
+                    Create account
+                  </Link>
+                  <Link href="/login" className="btn-quiet">
+                    Sign in
+                  </Link>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Info */}
-          <div className="mt-8 text-center">
-            <p className="text-gray-400 text-sm">
-              Rankings update in real-time. Play more games to climb the leaderboard!
-            </p>
-          </div>
-        </div>
-
-        {/* CTA for non-logged-in users */}
-        {!user && (
-          <div className="mt-16 max-w-4xl mx-auto bg-gradient-to-br from-purple-900/30 to-blue-900/30 backdrop-blur-sm border border-purple-500/20 rounded-2xl p-10 text-center">
-            <h2 className="text-3xl font-bold mb-4 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              Join the Competition!
-            </h2>
-            <p className="text-gray-300 mb-6 leading-relaxed">
-              Sign up now to track your progress, compete on the leaderboard, and become a champion!
-            </p>
-            <div className="flex gap-4 justify-center">
-              <Link
-                href="/signup"
-                className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl font-bold hover:from-purple-500 hover:to-blue-500 transition shadow-xl hover:shadow-purple-500/50"
-              >
-                Create Account
-              </Link>
-              <Link
-                href="/login"
-                className="px-8 py-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl font-bold hover:bg-white/20 transition"
-              >
-                Sign In
-              </Link>
-            </div>
-          </div>
+              </div>
+            )}
+          </>
         )}
-      </div>
+      </main>
+      <SiteFooter />
     </div>
   );
 }

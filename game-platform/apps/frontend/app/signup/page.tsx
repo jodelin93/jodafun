@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authClient, continueAsGuest } from '../lib/auth-client';
+import SiteHeader from '../components/ui/SiteHeader';
+import PlayingCard from '../components/ui/PlayingCard';
+import { AlertCircle, Brain } from 'lucide-react';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -21,12 +24,12 @@ export default function SignupPage() {
 
     // Validation
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError("The passwords don't match. Retype both and try again.");
       return;
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters long');
+      setError('Use a password with at least 8 characters.');
       return;
     }
 
@@ -40,13 +43,13 @@ export default function SignupPage() {
       });
 
       if (result.error) {
-        setError(result.error.message || 'Signup failed');
+        setError(result.error.message || "Couldn't create the account. Check your details and try again.");
       } else {
         // Redirect to home or dashboard
         router.push('/');
       }
     } catch (err) {
-      setError('An unexpected error occurred');
+      setError('Something went wrong. Try again in a moment.');
       console.error('Signup error:', err);
     } finally {
       setLoading(false);
@@ -61,7 +64,7 @@ export default function SignupPage() {
       await continueAsGuest();
       router.push('/');
     } catch (err) {
-      setError('Failed to continue as guest');
+      setError("Couldn't start a guest session. Check your connection and try again.");
       console.error('Guest login error:', err);
     } finally {
       setGuestLoading(false);
@@ -69,136 +72,112 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-50 to-pink-100 px-4">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Create Account
-            </h1>
-            <p className="text-gray-600">Sign up to start playing</p>
-          </div>
+    <>
+      <SiteHeader />
+      <main className="page py-8 sm:py-12">
+        <div className="grid items-center gap-12 lg:grid-cols-2">
+          <div className="panel mx-auto w-full max-w-md p-6 sm:p-8 lg:mx-0">
+            <h1 className="title-lg">Create your account</h1>
+            <p className="mt-2 text-chalk">Keep your scores and play from any device.</p>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
+            <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+              {error && (
+                <div role="alert" className="flex items-start gap-3 rounded-xl bg-signal/10 px-4 py-3 text-white ring-1 ring-inset ring-signal">
+                  <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-signal" aria-hidden="true" />
+                  <p className="font-medium">{error}</p>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="name" className="field-label">Name</label>
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="field"
+                  placeholder="Your name"
+                />
               </div>
-            )}
+              <div>
+                <label htmlFor="email" className="field-label">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="field"
+                  placeholder="you@example.com"
+                />
+              </div>
+              <div>
+                <label htmlFor="password" className="field-label">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="field"
+                  placeholder="At least 8 characters"
+                />
+              </div>
+              <div>
+                <label htmlFor="confirmPassword" className="field-label">Confirm password</label>
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="field"
+                  placeholder="Repeat your password"
+                />
+              </div>
 
-            <div>
-              <label
-                htmlFor="name"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Name
-              </label>
-              <input
-                id="name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition"
-                placeholder="Your name"
-              />
-            </div>
+              <button type="submit" disabled={loading} className="btn-gold w-full">
+                {loading ? 'Creating account…' : 'Create account'}
+              </button>
+            </form>
 
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition"
-                placeholder="At least 8 characters"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="confirmPassword"
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Confirm Password
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none transition"
-                placeholder="Repeat your password"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
-            >
-              {loading ? 'Creating account...' : 'Sign Up'}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-gray-600">
+            <p className="mt-6 text-chalk">
               Already have an account?{' '}
-              <Link
-                href="/login"
-                className="text-purple-600 font-medium hover:text-purple-700"
-              >
+              <Link href="/login" className="font-semibold text-white underline underline-offset-4 hover:text-gold">
                 Sign in
               </Link>
             </p>
-          </div>
-
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Or</span>
-              </div>
-            </div>
-
+          <div className="mt-6 border-t border-table-rim pt-6">
             <button
+              type="button"
               onClick={handleGuestContinue}
               disabled={guestLoading || loading}
-              className="mt-4 w-full bg-white border-2 border-gray-300 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
+              className="btn-quiet w-full"
             >
-              {guestLoading ? 'Creating guest account...' : 'Continue as Guest'}
+              {guestLoading ? 'Setting up your guest account…' : 'Play as a guest'}
             </button>
           </div>
+          </div>
+
+          <aside className="hidden lg:block" aria-hidden="true">
+            <div className="relative mx-auto h-72 w-80">
+              <PlayingCard faceUp={false} className="absolute left-2 top-8 h-56 w-40 -rotate-12" />
+              <PlayingCard faceUp={false} className="absolute right-2 top-8 h-56 w-40 rotate-12" />
+              <PlayingCard faceUp className="absolute left-1/2 top-2 h-56 w-40 -translate-x-1/2">
+                <div className="flex h-full items-center justify-center">
+                  <Brain className="h-16 w-16 text-ink" strokeWidth={1.5} />
+                </div>
+              </PlayingCard>
+            </div>
+            <p className="mx-auto mt-6 max-w-xs text-center text-chalk">Take a seat. Your account keeps your place at the table.</p>
+          </aside>
         </div>
-      </div>
-    </div>
+      </main>
+    </>
   );
 }
