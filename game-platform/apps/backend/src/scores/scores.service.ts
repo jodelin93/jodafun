@@ -7,6 +7,8 @@ import { Difficulty, Period, SubmitSoloScoreDto } from './scores.dto';
 
 const GAME_TYPE = 'joda-memory';
 const LEADERBOARD_SIZE = 50;
+// A friends game only counts on the leaderboard once it reached this round (forfeits before it don't)
+const MIN_LEADERBOARD_ROUNDS = 4;
 const MAX_TIME_SECONDS = 3600;
 const MAX_MOVES = 1000;
 
@@ -75,6 +77,8 @@ export class ScoresService {
       JOIN games g ON g.id = mh.game_id
       JOIN users u ON u.id = mh.user_id
       WHERE g.game_type = ${GAME_TYPE} ${this.periodFilterSql('mh.played_at', period)}
+        -- Only games that reached round 4 count (short forfeits don't); older rows fall back to rounds won + lost
+        AND COALESCE((g.settings->>'roundsPlayed')::int, mh.rounds_won + mh.rounds_lost) >= ${MIN_LEADERBOARD_ROUNDS}
       GROUP BY mh.user_id, u.name, u.email
       ORDER BY wins DESC,
                COUNT(*) FILTER (WHERE mh.result = 'win')::float / COUNT(*) DESC,

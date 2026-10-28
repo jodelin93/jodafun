@@ -28,6 +28,7 @@ export interface GameRoom {
   currentRound: number;
   roundWins: number[]; // [player1RoundWins, player2RoundWins]
   showOpponentMoves: boolean; // Whether players can see opponent's moves
+  pausedBy?: string | null; // player.id of whoever paused the game; only they can resume it
   // Server-side scoring state (never sent to clients)
   gameActive: boolean; // true from the first deal until the game ends or is abandoned
   roundActive: boolean; // true while the current deal still has unmatched cards

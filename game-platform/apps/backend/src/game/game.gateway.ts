@@ -157,16 +157,28 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       return { success: false, error: 'Room not found' };
     }
 
-    const player =
-      typeof data.playerKey === 'string' && data.playerKey
-        ? room.players.find(p => p.playerKey === data.playerKey)
-        : undefined;
+    const userId = await this.getSocketUserId(client.id);
+    const player = this.findOwnSeat(room, data.playerKey, userId);
     if (!player) {
       return { success: false, error: 'Seat not found' };
     }
 
+    return this.reclaimSeat(room, player, client, userId);
+  }
+
+  // A player's own seat in this room: same tab (playerKey), or a dropped seat of the same signed-in user (new tab/window)
+  private findOwnSeat(room: GameRoom, playerKey: unknown, userId: string | null): Player | undefined {
+    if (typeof playerKey === 'string' && playerKey) {
+      const byKey = room.players.find(p => p.playerKey === playerKey);
+      if (byKey) return byKey;
+    }
+    return userId ? room.players.find(p => p.userId === userId && !p.connected) : undefined;
+  }
+
+  // Move a held seat onto the caller's socket and return the room plus, mid-game, the board to resync from
+  private reclaimSeat(room: GameRoom, player: Player, client: Socket, userId: string | null, playerKey?: unknown) {
+    const roomId = room.id;
     this.clearGraceTimer(player);
-    const userId = await this.getSocketUserId(client.id);
 
     // If the old socket is somehow still alive, stop it receiving this room's events
     if (player.socketId !== client.id) {
@@ -179,6 +191,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     player.connected = true;
     player.disconnectedAt = null;
     player.userId = userId;
+    if (typeof playerKey === 'string' && playerKey) player.playerKey = playerKey;
     client.join(roomId);
     this.rooms.save(room);
 
@@ -192,12 +205,15 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
     return {
       success: true,
+      rejoined: true,
       room: {
         id: room.id,
         players: this.publicPlayers(room),
         difficulty: room.difficulty,
         showOpponentMoves: room.showOpponentMoves,
         gameStarted: room.gameStarted,
+        pausedById: room.pausedBy ?? null,
+        pausedByName: room.players.find(p => p.id === room.pausedBy)?.name ?? null,
       },
       game:
         room.gameStarted && room.cards.length > 0
@@ -289,6 +305,12 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         success: false,
         error: 'Game room not found',
       };
+    }
+
+    // Reloading the page or reopening the link must not lock someone out of the seat being held for them
+    const ownSeat = this.findOwnSeat(room, data.playerKey, userId);
+    if (ownSeat) {
+      return this.reclaimSeat(room, ownSeat, client, userId, data.playerKey);
     }
 
     if (room.players.length >= 2) {
@@ -393,6 +415,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (room.roundActive) {
       return { success: false, error: 'Round in progress' };
     }
+    room.pausedBy = null;
 
     // The server always deals; an older client's deck only tells us its size
     const difficulty = isDifficulty(data?.difficulty)
@@ -477,10 +500,37 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       return { success: false, error: 'Room not found' };
     }
 
-    // Broadcast pause state to all players in the room
+    const player = room.players.find(p => p.socketId === client.id);
+    if (!player) {
+      return { success: false, error: 'Player not found' };
+    }
+
+    const paused = Boolean(data?.paused);
+    if (paused) {
+      if (!room.gameStarted) {
+        return { success: false, error: 'No game in progress' };
+      }
+      if (room.pausedBy && room.pausedBy !== player.id) {
+        return { success: false, error: 'Already paused' };
+      }
+      room.pausedBy = player.id;
+    } else {
+      if (!room.pausedBy) {
+        return { success: true };
+      }
+      // Only the player who paused can resume, so nobody gets pulled back into a game they stopped
+      if (room.pausedBy !== player.id) {
+        return { success: false, error: 'Only the player who paused can resume' };
+      }
+      room.pausedBy = null;
+    }
+    this.rooms.save(room);
+
     this.server.to(roomId).emit('gamePaused', {
-      paused: data.paused,
+      paused,
       pausedBy: client.id,
+      pausedById: player.id,
+      pausedByName: player.name,
     });
 
     return { success: true };
@@ -527,6 +577,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
     if (!room) {
       return { success: false, error: 'Room not found' };
+    }
+
+    if (room.pausedBy) {
+      return { success: false, error: 'Game paused' };
     }
 
     const playerIndex = room.players.findIndex(p => p.socketId === client.id);
@@ -667,6 +721,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
   // Shared by leaveRoom and the grace timer
   private removePlayer(roomId: string, room: GameRoom, socketId: string) {
+    room.pausedBy = null;
     const playerIndex = room.players.findIndex(p => p.socketId === socketId);
     if (playerIndex === -1) return;
 
@@ -691,6 +746,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         [...room.totalPairs],
         room.gameDifficulty,
         startedAt,
+        room.currentRound,
         true,
       ).catch(error => console.error(`Failed to save forfeit for room ${roomId}:`, error));
     }
@@ -753,9 +809,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     const totalPairs = [...room.totalPairs];
     const difficulty = room.gameDifficulty;
     const startedAt = room.gameStartedAt ?? new Date();
+    const roundsPlayed = room.currentRound;
     this.resetGameState(room);
 
-    this.saveGameResult(players, winnerIndex, roundWins, totalPairs, difficulty, startedAt).catch(
+    this.saveGameResult(players, winnerIndex, roundWins, totalPairs, difficulty, startedAt, roundsPlayed).catch(
       error => console.error(`Failed to save game result for room ${room.id}:`, error),
     );
   }
@@ -767,6 +824,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     totalPairs: number[],
     difficulty: string,
     startedAt: Date,
+    roundsPlayed: number,
     forfeit = false,
   ) {
     // Only head-to-head games count
@@ -783,7 +841,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         player1Id: userIds[0],
         player2Id: userIds[1],
         winnerId: userIds[winnerIndex],
-        settings: forfeit ? { difficulty, roundWins, forfeit: true } : { difficulty, roundWins },
+        // roundsPlayed includes tied rounds; the leaderboard only counts games that reached round 4
+        settings: forfeit ? { difficulty, roundWins, roundsPlayed, forfeit: true } : { difficulty, roundWins, roundsPlayed },
         startedAt,
         completedAt: new Date(),
         matchHistory: {
