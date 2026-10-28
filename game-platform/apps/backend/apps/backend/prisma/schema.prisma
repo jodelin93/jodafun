@@ -1,0 +1,116 @@
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username      String   @unique @db.VarChar(50)
+  email         String?  @unique @db.VarChar(255)
+  passwordHash  String?  @map("password_hash") @db.VarChar(255)
+  isGuest       Boolean  @default(false) @map("is_guest")
+  displayName   String?  @map("display_name") @db.VarChar(100)
+  avatarUrl     String?  @map("avatar_url") @db.VarChar(500)
+  createdAt     DateTime @default(now()) @map("created_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  // Relations
+  gamesAsPlayer1    Game[]         @relation("Player1Games")
+  gamesAsPlayer2    Game[]         @relation("Player2Games")
+  gamesWon          Game[]         @relation("WinnerGames")
+  roundsWon         GameRound[]    @relation("RoundWinner")
+  friendships       Friendship[]   @relation("UserFriendships")
+  friendOf          Friendship[]   @relation("FriendOfUser")
+  matchHistoryAsUser    MatchHistory[] @relation("UserMatches")
+  matchHistoryAsOpponent MatchHistory[] @relation("OpponentMatches")
+
+  @@index([username])
+  @@index([email])
+  @@map("users")
+}
+
+model Game {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  gameType    String    @map("game_type") @db.VarChar(50)
+  roomCode    String?   @unique @map("room_code") @db.VarChar(6)
+  status      String    @default("waiting") @db.VarChar(20)
+  player1Id   String?   @map("player1_id") @db.Uuid
+  player2Id   String?   @map("player2_id") @db.Uuid
+  winnerId    String?   @map("winner_id") @db.Uuid
+  settings    Json?     @db.JsonB
+  createdAt   DateTime  @default(now()) @map("created_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  // Relations
+  player1      User?         @relation("Player1Games", fields: [player1Id], references: [id])
+  player2      User?         @relation("Player2Games", fields: [player2Id], references: [id])
+  winner       User?         @relation("WinnerGames", fields: [winnerId], references: [id])
+  rounds       GameRound[]
+  matchHistory MatchHistory[]
+
+  @@index([roomCode])
+  @@index([status])
+  @@map("games")
+}
+
+model GameRound {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  gameId        String    @map("game_id") @db.Uuid
+  roundNumber   Int       @map("round_number")
+  player1Score  Int       @default(0) @map("player1_score")
+  player2Score  Int       @default(0) @map("player2_score")
+  winnerId      String?   @map("winner_id") @db.Uuid
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+
+  // Relations
+  game   Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  winner User? @relation("RoundWinner", fields: [winnerId], references: [id])
+
+  @@unique([gameId, roundNumber])
+  @@map("game_rounds")
+}
+
+model Friendship {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  friendId  String   @map("friend_id") @db.Uuid
+  status    String   @default("pending") @db.VarChar(20)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user   User @relation("UserFriendships", fields: [userId], references: [id], onDelete: Cascade)
+  friend User @relation("FriendOfUser", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@map("friendships")
+}
+
+model MatchHistory {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  gameId     String   @map("game_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  opponentId String?  @map("opponent_id") @db.Uuid
+  result     String   @db.VarChar(10)
+  roundsWon  Int      @default(0) @map("rounds_won")
+  roundsLost Int      @default(0) @map("rounds_lost")
+  totalScore Int      @default(0) @map("total_score")
+  playedAt   DateTime @default(now()) @map("played_at")
+
+  // Relations
+  game     Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user     User  @relation("UserMatches", fields: [userId], references: [id], onDelete: Cascade)
+  opponent User? @relation("OpponentMatches", fields: [opponentId], references: [id])
+
+  @@index([userId])
+  @@index([playedAt])
+  @@map("match_history")
+}
