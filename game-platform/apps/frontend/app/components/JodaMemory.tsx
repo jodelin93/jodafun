@@ -6,7 +6,7 @@ import { getSoundManager } from '../lib/sounds/soundManager';
 import SoundControls from './SoundControls';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
-  Gamepad2, Dices, Target, Circus, Palette, Drama, Film, Mic,
+  Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
   Piano, Guitar, Music, Disc, Sparkles, Crown, Trophy, Star,
   Heart, Diamond, Zap, Rocket, Bot, Users, Clock, RotateCcw,
   ArrowLeft, Volume2, Brain, X, Eye, EyeOff, Copy, Check, Link2,
@@ -34,6 +34,7 @@ type Player = {
   isHost: boolean;
   isReady: boolean;
   socketId: string;
+  isGuest?: boolean;
 };
 
 type LobbyPlayer = {
@@ -325,13 +326,18 @@ export default function JodaMemory() {
 
       // Listen for game started
       socket.on('gameStarted', (data: { cards: any[]; currentPlayerIndex: number; players: Player[] }) => {
-        const mappedCards: Card[] = data.cards.map((card: any, index: number) => ({
-          id: index,
-          iconName: card.iconName,
-          Icon: ICON_SETS[difficulty].find(icon => icon.name === card.iconName)?.Icon || Gamepad2,
-          isFlipped: false,
-          isMatched: false,
-        }));
+        const mappedCards: Card[] = data.cards.map((card: any, index: number) => {
+          const imageData = IMAGE_POOL.find(img => img.name === card.iconName);
+          return {
+            id: index,
+            iconName: card.iconName,
+            Icon: imageData?.Icon || Gamepad2,
+            imageUrl: imageData?.imageUrl,
+            color: imageData?.color || 'from-slate-400 to-gray-600',
+            isFlipped: false,
+            isMatched: false,
+          };
+        });
 
         setCards(mappedCards);
         setPlayers(data.players);
@@ -343,7 +349,7 @@ export default function JodaMemory() {
         setGameWon(false);
 
         if (soundInitialized) {
-          getSoundManager().play('start');
+          getSoundManager().play('myTurn');
         }
       });
 
@@ -451,18 +457,20 @@ export default function JodaMemory() {
   // Handle round completion and check for overall winner
   const handleRoundComplete = () => {
     // Determine round winner based on scores
-    const winner = players[0].score > players[1].score ? 0 :
-                   players[1].score > players[0].score ? 1 : null;
+    const score0 = players[0]?.score ?? 0;
+    const score1 = players[1]?.score ?? 0;
+    const winner = score0 > score1 ? 0 :
+                   score1 > score0 ? 1 : null;
 
     if (winner !== null) {
       // Update round wins
       const newRoundWins = [...roundWins];
-      newRoundWins[winner] += 1;
+      newRoundWins[winner] = (newRoundWins[winner] ?? 0) + 1;
       setRoundWins(newRoundWins);
       setRoundWinner(winner);
 
       // Check if someone won the overall game (first to 4 rounds)
-      if (newRoundWins[winner] >= 4) {
+      if ((newRoundWins[winner] ?? 0) >= 4) {
         setOverallWinner(winner);
         setGameWon(true);
       } else {
@@ -708,7 +716,7 @@ export default function JodaMemory() {
     // For single player, initialize just one player
     if (gameMode === 'single') {
       setPlayers([
-        { name: 'You', score: 0, socketId: '' }
+        { id: '', name: 'You', score: 0, isHost: true, isReady: true, socketId: '' }
       ]);
     } else {
       // For multiplayer, reset existing player scores
@@ -740,7 +748,7 @@ export default function JodaMemory() {
           window.history.pushState({}, '', url.toString());
 
           if (soundInitialized) {
-            getSoundManager().play('start');
+            getSoundManager().play('myTurn');
           }
         }
       });
@@ -1002,7 +1010,7 @@ export default function JodaMemory() {
                 // Overall game winner
                 <>
                   <h2 className="text-4xl font-bold text-white mb-4">
-                    🏆 {players[overallWinner].name} Wins the Game! 🏆
+                    🏆 {players[overallWinner]?.name} Wins the Game! 🏆
                   </h2>
                   <p className="text-white/90 text-xl mb-2">
                     Overall Score: {roundWins[overallWinner]} - {roundWins[overallWinner === 0 ? 1 : 0]}
@@ -1015,10 +1023,10 @@ export default function JodaMemory() {
                 // Round winner
                 <>
                   <h2 className="text-3xl font-bold text-white mb-3">
-                    🎉 {players[roundWinner].name} Won Round {currentRound}! 🎉
+                    🎉 {players[roundWinner]?.name} Won Round {currentRound}! 🎉
                   </h2>
                   <p className="text-white/90 mb-3">
-                    Round Score: {roundWinner !== null && players[roundWinner] ? `${players[roundWinner].score} - ${players[roundWinner === 0 ? 1 : 0].score}` : ''} pairs
+                    Round Score: {roundWinner !== null && players[roundWinner] ? `${players[roundWinner].score} - ${players[roundWinner === 0 ? 1 : 0]?.score ?? 0}` : ''} pairs
                   </p>
                   <p className="text-white/90 text-lg mb-4">
                     Overall Score: {roundWins[0]} - {roundWins[1]}

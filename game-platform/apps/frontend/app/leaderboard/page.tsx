@@ -298,9 +298,9 @@ export default function LeaderboardPage() {
                 <div className="flex justify-center mb-4">
                   {getRankBadge(2)}
                 </div>
-                <div className="text-4xl mb-3">{mockLeaderboard[1].avatar}</div>
-                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[1].name}</h3>
-                <div className="text-3xl font-black text-gray-300 mb-1">{mockLeaderboard[1].score.toLocaleString()}</div>
+                <div className="text-4xl mb-3">{mockLeaderboard[1]!.avatar}</div>
+                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[1]!.name}</h3>
+                <div className="text-3xl font-black text-gray-300 mb-1">{mockLeaderboard[1]!.score.toLocaleString()}</div>
                 <p className="text-sm text-gray-400">points</p>
               </div>
             </div>
@@ -316,14 +316,14 @@ export default function LeaderboardPage() {
                 <div className="flex justify-center mb-4 mt-4">
                   {getRankBadge(1)}
                 </div>
-                <div className="text-5xl mb-4">{mockLeaderboard[0].avatar}</div>
-                <h3 className="text-2xl font-bold text-white mb-3">{mockLeaderboard[0].name}</h3>
-                <div className="text-4xl font-black text-yellow-300 mb-1">{mockLeaderboard[0].score.toLocaleString()}</div>
+                <div className="text-5xl mb-4">{mockLeaderboard[0]!.avatar}</div>
+                <h3 className="text-2xl font-bold text-white mb-3">{mockLeaderboard[0]!.name}</h3>
+                <div className="text-4xl font-black text-yellow-300 mb-1">{mockLeaderboard[0]!.score.toLocaleString()}</div>
                 <p className="text-sm text-gray-300">points</p>
                 <div className="mt-4 pt-4 border-t border-yellow-400/30">
                   <div className="flex items-center justify-center gap-2 text-sm">
                     <TrendingUp className="w-4 h-4 text-green-400" />
-                    <span className="text-green-400 font-semibold">{mockLeaderboard[0].streak} win streak</span>
+                    <span className="text-green-400 font-semibold">{mockLeaderboard[0]!.streak} win streak</span>
                   </div>
                 </div>
               </div>
@@ -335,9 +335,9 @@ export default function LeaderboardPage() {
                 <div className="flex justify-center mb-4">
                   {getRankBadge(3)}
                 </div>
-                <div className="text-4xl mb-3">{mockLeaderboard[2].avatar}</div>
-                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[2].name}</h3>
-                <div className="text-3xl font-black text-orange-300 mb-1">{mockLeaderboard[2].score.toLocaleString()}</div>
+                <div className="text-4xl mb-3">{mockLeaderboard[2]!.avatar}</div>
+                <h3 className="text-xl font-bold text-white mb-2">{mockLeaderboard[2]!.name}</h3>
+                <div className="text-3xl font-black text-orange-300 mb-1">{mockLeaderboard[2]!.score.toLocaleString()}</div>
                 <p className="text-sm text-gray-400">points</p>
               </div>
             </div>
