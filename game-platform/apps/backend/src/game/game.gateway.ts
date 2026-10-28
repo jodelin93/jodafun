@@ -10,9 +10,10 @@ import {
 import { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveSessionUser } from '../auth/session';
+import { resolveSessionUser, type SessionUser } from '../auth/session';
 import { RoomStore, type Difficulty, type GameRoom, type Player } from './room-store';
 import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
+import { PresenceState, presenceName, type PresenceEntry } from './presence';
 
 // Pairs dealt per difficulty; a deck must contain exactly twice this many cards
 export const PAIRS_BY_DIFFICULTY = { easy: 4, medium: 8, hard: 12 } as const;
@@ -20,6 +21,8 @@ const ROUND_WINS_TO_WIN_GAME = 4;
 // Socket ids from a previous process are prefixed so no live socket can match them
 const STALE_SOCKET_PREFIX = 'stale:';
 const TOO_MANY_REQUESTS = { success: false, error: 'Too many requests' };
+const PRESENCE_LIST_MAX = 50;
+const PRESENCE_EMIT_INTERVAL_MS = 1000;
 
 const isDifficulty = (value: unknown): value is Difficulty =>
   value === 'easy' || value === 'medium' || value === 'hard';
@@ -40,12 +43,18 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   @WebSocketServer()
   server: Server;
 
-  // userId per socket, resolved from the session cookie on connect (null = anonymous)
-  private socketUsers: Map<string, Promise<string | null>> = new Map();
+  // Session user per socket, resolved from the session cookie on connect (null = anonymous)
+  private socketUsers: Map<string, Promise<SessionUser | null>> = new Map();
   // Removal timers for disconnected players in their grace period
   private graceTimers: Map<Player, NodeJS.Timeout> = new Map();
   private flipLimiter = new RateLimiter(10, 1000);
   private joinLimiter = new RateLimiter(20, 60_000);
+  private inviteLimiter = new RateLimiter(10, 60_000);
+  private presence = new PresenceState();
+  // Trailing throttle for presence:changed
+  private presenceTimer: NodeJS.Timeout | null = null;
+  private lastPresenceEmitAt = 0;
+  private lastPresenceSignature = '';
 
   constructor(
     private prisma: PrismaService,
@@ -105,6 +114,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (!stored || (cached && stored.updatedAt <= cached.updatedAt)) return cached;
     cached?.players.forEach(player => this.clearGraceTimer(player));
     this.adoptRoom(stored, Date.now());
+    // The adopted copy may hold seats that unlist someone
+    this.schedulePresenceChanged();
     return this.rooms.get(roomId);
   }
 
@@ -113,7 +124,6 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     this.socketUsers.set(
       client.id,
       resolveSessionUser(this.prisma, client.handshake.headers.cookie)
-        .then(user => user?.id ?? null)
         .catch(error => {
           console.error(`Session lookup failed for ${client.id}:`, error);
           return null;
@@ -126,6 +136,9 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     this.socketUsers.delete(client.id);
     this.flipLimiter.forget(client.id);
     this.joinLimiter.forget(client.id);
+    this.inviteLimiter.forget(client.id);
+    this.presence.available.delete(client.id);
+    this.clearInvitesOf(client.id);
 
     // Keep the seat for a grace period so the player can rejoin from a new socket
     for (const room of this.rooms.values()) {
@@ -143,6 +156,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       this.startGraceTimer(room, player);
       this.rooms.save(room);
     }
+    this.schedulePresenceChanged();
   }
 
   @SubscribeMessage('rejoinRoom')
@@ -194,6 +208,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (typeof playerKey === 'string' && playerKey) player.playerKey = playerKey;
     client.join(roomId);
     this.rooms.save(room);
+    this.onSeated(client.id);
 
     this.server.to(roomId).emit('playerReconnected', {
       playerId: player.id,
@@ -237,27 +252,34 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     @ConnectedSocket() client: Socket,
   ) {
     if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
-    const roomId = generateRoomCode(code => this.rooms.has(code));
     const difficulty = isDifficulty(data?.difficulty) ? data.difficulty : 'easy';
+    const userId = await this.getSocketUserId(client.id);
+    const room = this.openRoom(client, data.playerName, userId, data.playerKey, difficulty);
+    const roomId = room.id;
 
-    const host: Player = {
-      id: client.id,
-      name: data.playerName,
-      score: 0,
-      isHost: true,
-      isReady: false,
-      socketId: client.id,
-      userId: await this.getSocketUserId(client.id),
-      playerKey: typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
-      connected: true,
-      disconnectedAt: null,
+    console.log(`Game created: ${roomId} by ${data.playerName}`);
+
+    return {
+      success: true,
+      roomId,
+      room: this.sanitizeRoom(room),
     };
+  }
 
+  // Creates a room with the given socket as host (createGame and accepted requests)
+  private openRoom(
+    hostSocket: Socket,
+    name: string,
+    userId: string | null,
+    playerKey: unknown,
+    difficulty: Difficulty,
+  ): GameRoom {
+    const roomId = generateRoomCode(code => this.rooms.has(code));
     const now = Date.now();
     const room: GameRoom = {
       id: roomId,
-      hostId: client.id,
-      players: [host],
+      hostId: hostSocket.id,
+      players: [this.newPlayer(hostSocket.id, name, userId, playerKey, true)],
       difficulty,
       gameStarted: false,
       currentPlayerIndex: 0,
@@ -279,14 +301,23 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     };
 
     this.rooms.save(room);
-    client.join(roomId);
+    hostSocket.join(roomId);
+    this.onSeated(hostSocket.id);
+    return room;
+  }
 
-    console.log(`Game created: ${roomId} by ${data.playerName}`);
-
+  private newPlayer(socketId: string, name: string, userId: string | null, playerKey: unknown, isHost: boolean): Player {
     return {
-      success: true,
-      roomId,
-      room: this.sanitizeRoom(room),
+      id: socketId,
+      name,
+      score: 0,
+      isHost,
+      isReady: false,
+      socketId,
+      userId,
+      playerKey: typeof playerKey === 'string' && playerKey ? playerKey : undefined,
+      connected: true,
+      disconnectedAt: null,
     };
   }
 
@@ -327,22 +358,12 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       };
     }
 
-    const player: Player = {
-      id: client.id,
-      name: data.playerName,
-      score: 0,
-      isHost: false,
-      isReady: false,
-      socketId: client.id,
-      userId,
-      playerKey: typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
-      connected: true,
-      disconnectedAt: null,
-    };
+    const player = this.newPlayer(client.id, data.playerName, userId, data.playerKey, false);
 
     room.players.push(player);
     this.rooms.save(room);
     client.join(roomId);
+    this.onSeated(client.id);
 
     // Notify all players in the room
     this.server.to(roomId).emit('playerJoined', {
@@ -792,6 +813,231 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     }
 
     console.log(`Player ${leavingPlayer.name} left room ${roomId}`);
+    // Freeing a seat can make its owner listed again
+    this.schedulePresenceChanged();
+  }
+
+  @SubscribeMessage('presence:update')
+  async handlePresenceUpdate(
+    @MessageBody() data: { available: boolean; name?: string; playerKey?: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const user = await this.getSocketUser(client.id);
+    // The socket may have disconnected while the session lookup was pending
+    if (!client.connected) return { success: true };
+
+    if (data?.available === true) {
+      const existing = this.presence.available.get(client.id);
+      this.presence.available.set(client.id, {
+        socketId: client.id,
+        name: presenceName(data.name, user?.name),
+        playerKey: typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : existing?.playerKey,
+        userId: user?.id ?? null,
+        isGuest: user ? user.isGuest : true,
+        since: existing?.since ?? Date.now(),
+      });
+    } else {
+      this.presence.available.delete(client.id);
+    }
+    this.schedulePresenceChanged();
+    return { success: true };
+  }
+
+  @SubscribeMessage('presence:list')
+  async handlePresenceList(@ConnectedSocket() client: Socket) {
+    const userId = await this.getSocketUserId(client.id);
+    const players = this.listedPlayers()
+      .filter(e => e.socketId !== client.id && !(userId && e.userId === userId))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, PRESENCE_LIST_MAX)
+      .map(e => ({ id: e.socketId, name: e.name, isGuest: e.isGuest, since: e.since }));
+    return { players };
+  }
+
+  @SubscribeMessage('invite:send')
+  async handleInviteSend(
+    @MessageBody() data: { toId: string; playerKey: string; difficulty?: Difficulty },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!this.inviteLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
+    const user = await this.getSocketUser(client.id);
+    if (!client.connected) return { success: false, error: 'Player not available' };
+
+    const target = this.listedPlayers().find(e => e.socketId === data?.toId);
+    if (!target || target.socketId === client.id || (user && target.userId === user.id)) {
+      return { success: false, error: 'Player not available' };
+    }
+    // Accepting would fail anyway: a seated socket cannot be put in a new room
+    if (this.isSeated(client.id)) {
+      return { success: false, error: 'You are already in a room' };
+    }
+    if (this.presence.outgoing(client.id)) {
+      return { success: false, error: 'You already have a pending request' };
+    }
+    if (this.presence.incoming(target.socketId)) {
+      return { success: false, error: 'They already have a request' };
+    }
+
+    const invite = this.presence.addInvite(
+      client.id,
+      target.socketId,
+      typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
+      isDifficulty(data.difficulty) ? data.difficulty : 'medium',
+      expired => {
+        this.server.to(expired.fromId).emit('invite:expired', { inviteId: expired.id });
+        this.server.to(expired.toId).emit('invite:expired', { inviteId: expired.id });
+      },
+    );
+    this.server.to(target.socketId).emit('invite:received', {
+      inviteId: invite.id,
+      from: { id: client.id, name: this.presenceNameOf(client.id, user) },
+      expiresAt: invite.expiresAt,
+    });
+    return { success: true, inviteId: invite.id, expiresAt: invite.expiresAt };
+  }
+
+  @SubscribeMessage('invite:respond')
+  async handleInviteRespond(
+    @MessageBody() data: { inviteId: string; accept: boolean; playerKey: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const invite = this.presence.getInvite(data?.inviteId);
+    // Only the target can answer; for anyone else the request does not exist
+    if (!invite || invite.toId !== client.id) {
+      return { success: false, error: 'Request expired' };
+    }
+    // Removed before any await so the same request cannot be answered twice
+    this.presence.removeInvite(invite);
+
+    const user = await this.getSocketUser(client.id);
+    if (data.accept !== true) {
+      this.server.to(invite.fromId).emit('invite:declined', {
+        inviteId: invite.id,
+        byName: this.presenceNameOf(client.id, user),
+      });
+      return { success: true };
+    }
+
+    const inviterUser = await this.getSocketUser(invite.fromId);
+    // Checked after the awaits: either side may have disconnected or taken a seat meanwhile
+    const inviterSocket = this.server.sockets.sockets.get(invite.fromId);
+    if (!inviterSocket?.connected || !client.connected || this.isSeated(invite.fromId) || this.isSeated(client.id)) {
+      this.server.to(invite.fromId).emit('invite:expired', { inviteId: invite.id });
+      return { success: false, error: 'Player no longer available' };
+    }
+
+    const room = this.openRoom(
+      inviterSocket,
+      this.presenceNameOf(invite.fromId, inviterUser),
+      inviterUser?.id ?? null,
+      invite.fromPlayerKey ?? this.presence.available.get(invite.fromId)?.playerKey,
+      invite.difficulty,
+    );
+    const playerKey =
+      typeof data.playerKey === 'string' && data.playerKey
+        ? data.playerKey
+        : this.presence.available.get(client.id)?.playerKey;
+    room.players.push(this.newPlayer(client.id, this.presenceNameOf(client.id, user), user?.id ?? null, playerKey, false));
+    this.rooms.save(room);
+    client.join(room.id);
+    this.onSeated(client.id);
+
+    const roomInfo = {
+      id: room.id,
+      players: this.publicPlayers(room),
+      difficulty: room.difficulty,
+      showOpponentMoves: room.showOpponentMoves,
+      gameStarted: false,
+    };
+    this.server.to(invite.fromId).emit('invite:accepted', { inviteId: invite.id, room: roomInfo });
+    console.log(`Game created from request: ${room.id}`);
+
+    return { success: true, room: roomInfo };
+  }
+
+  @SubscribeMessage('invite:cancel')
+  handleInviteCancel(
+    @MessageBody() data: { inviteId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const invite = this.presence.getInvite(data?.inviteId);
+    // Already expired or answered: nothing left to cancel
+    if (!invite) return { success: true };
+    if (invite.fromId !== client.id) {
+      return { success: false, error: 'Request expired' };
+    }
+    this.presence.removeInvite(invite);
+    this.server.to(invite.toId).emit('invite:cancelled', { inviteId: invite.id });
+    return { success: true };
+  }
+
+  // Available, connected sockets whose person has no current room: not seated on this socket,
+  // and no seat (connected or in its grace period) held for the same playerKey or userId
+  private listedPlayers(): PresenceEntry[] {
+    const seatedSockets = new Set<string>();
+    const heldKeys = new Set<string>();
+    const heldUsers = new Set<string>();
+    for (const room of this.rooms.values()) {
+      for (const p of room.players) {
+        seatedSockets.add(p.socketId);
+        if (p.playerKey) heldKeys.add(p.playerKey);
+        if (p.userId) heldUsers.add(p.userId);
+      }
+    }
+    return [...this.presence.available.values()].filter(
+      e =>
+        this.server.sockets.sockets.get(e.socketId)?.connected &&
+        !seatedSockets.has(e.socketId) &&
+        !(e.playerKey && heldKeys.has(e.playerKey)) &&
+        !(e.userId && heldUsers.has(e.userId)),
+    );
+  }
+
+  private isSeated(socketId: string): boolean {
+    for (const room of this.rooms.values()) {
+      if (room.players.some(p => p.socketId === socketId)) return true;
+    }
+    return false;
+  }
+
+  private presenceNameOf(socketId: string, user: SessionUser | null): string {
+    return this.presence.available.get(socketId)?.name ?? presenceName(undefined, user?.name);
+  }
+
+  // A socket that takes a seat drops its pending requests and leaves the online list
+  private onSeated(socketId: string) {
+    this.clearInvitesOf(socketId);
+    this.schedulePresenceChanged();
+  }
+
+  // The other side hears 'cancelled' when the inviter left, 'expired' when the target left
+  private clearInvitesOf(socketId: string) {
+    for (const invite of this.presence.invitesOf(socketId)) {
+      this.presence.removeInvite(invite);
+      if (invite.fromId === socketId) {
+        this.server.to(invite.toId).emit('invite:cancelled', { inviteId: invite.id });
+      } else {
+        this.server.to(invite.fromId).emit('invite:expired', { inviteId: invite.id });
+      }
+    }
+  }
+
+  // Trailing throttle: at most one presence:changed per second, only when the listed set changed
+  private schedulePresenceChanged() {
+    if (this.presenceTimer) return;
+    const delay = Math.max(0, this.lastPresenceEmitAt + PRESENCE_EMIT_INTERVAL_MS - Date.now());
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = null;
+      const listed = this.listedPlayers();
+      const signature = listed
+        .map(e => e.socketId)
+        .sort()
+        .join(',');
+      if (signature === this.lastPresenceSignature) return;
+      this.lastPresenceSignature = signature;
+      this.lastPresenceEmitAt = Date.now();
+      this.server.emit('presence:changed', { count: listed.length });
+    }, delay);
   }
 
   private endRound(room: GameRoom) {
@@ -924,6 +1170,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   }
 
   private async getSocketUserId(socketId: string): Promise<string | null> {
+    return (await this.getSocketUser(socketId))?.id ?? null;
+  }
+
+  private async getSocketUser(socketId: string): Promise<SessionUser | null> {
     return (await this.socketUsers.get(socketId)) ?? null;
   }
 
