@@ -6,6 +6,8 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000', {
       transports: ['websocket', 'polling'],
+      // Send the session cookie so the server knows who is playing and can save results
+      withCredentials: true,
       autoConnect: false,
     });
   }
