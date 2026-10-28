@@ -29,6 +29,8 @@
     "@nestjs/websockets": "^11.2.8",
     "@prisma/client": "^5.22.0",
     "better-auth": "^1.7.14",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "prisma": "^5.22.0",
     "reflect-metadata": "^0.2.2",
