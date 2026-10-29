@@ -11,10 +11,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
 import ShareRoomButton from './ShareRoomButton';
+import AlternateRoom, { AltOpponentLine, formatAltTime, type AltRoomState } from './AlternateRoom';
 import LanguageSwitcher from '../i18n/LanguageSwitcher';
 import { useT } from '../i18n/I18nProvider';
 import { gameMessages } from '../i18n/messages/game';
 import { howToPlayMessages } from '../i18n/messages/howToPlay';
+import { alternateMessages } from '../i18n/messages/alternate';
 import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 import {
   Gamepad2, Dices, Target, Palette, Drama, Film, Mic,
@@ -23,7 +25,7 @@ import {
   ArrowLeft, Volume2, Brain, X, Eye, EyeOff, Copy, Check, Link2,
   Pause, Play, Home, LogOut, MessageSquare, Send, Gem, Flame,
   Cherry, Cpu, Puzzle, Sword, Wand2, Smile, Ghost, Coffee,
-  Cake, PartyPopper, Gift, Sparkle, User, Globe, Swords, ChevronDown
+  Cake, PartyPopper, Gift, Sparkle, User, Globe, Swords, ChevronDown, Repeat
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
@@ -58,7 +60,8 @@ type LobbyPlayer = {
 };
 
 type Difficulty = 'easy' | 'medium' | 'hard';
-type GameMode = 'single' | 'multiplayer' | null;
+// alternate: a room where each player clears the same 4 boards on their own, round by round
+type GameMode = 'single' | 'multiplayer' | 'alternate' | null;
 
 // Large pool of beautiful curated images using Picsum Photos (free, high-quality)
 // Images are randomly selected from this pool each game for variety
@@ -137,6 +140,25 @@ const IMAGE_POOL = [
   { name: 'img70', Icon: Flame, imageUrl: 'https://picsum.photos/id/91/400/400', color: 'from-amber-400 to-red-500' },
 ];
 
+// A card slot of an alternate board: its picture is unknown ('') until the server reveals it on a flip
+function cardFor(id: number, iconName: string, state: { isFlipped?: boolean; isMatched?: boolean } = {}): Card {
+  const imageData = IMAGE_POOL.find(img => img.name === iconName);
+  return {
+    id,
+    iconName,
+    Icon: imageData?.Icon || Gamepad2,
+    imageUrl: imageData?.imageUrl,
+    color: imageData?.color || 'from-slate-400 to-gray-600',
+    isFlipped: Boolean(state.isFlipped),
+    isMatched: Boolean(state.isMatched),
+  };
+}
+
+const difficultyForCards = (count: number): Difficulty => (count >= 24 ? 'hard' : count >= 16 ? 'medium' : 'easy');
+
+// Alternate seats are held for a day, so the "Return to room" link lasts as long
+const ALT_ROOM_HOLD_MS = 24 * 60 * 60 * 1000;
+
 const GRID_COLS = {
   easy: 4,
   medium: 4,
@@ -148,6 +170,7 @@ export default function JodaMemory() {
   const router = useRouter();
   const t = useT(gameMessages);
   const th = useT(howToPlayMessages);
+  const ta = useT(alternateMessages);
   const [gameMode, setGameMode] = useState<GameMode>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [cards, setCards] = useState<Card[]>([]);
@@ -193,7 +216,7 @@ export default function JodaMemory() {
   const [myPlayerIndex, setMyPlayerIndex] = useState(0);
   const [roundTied, setRoundTied] = useState(false);
   // Name of the player who just left, and whether that ended a game in progress
-  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean; reachedRound: number } | null>(null);
+  const [playerLeftNotice, setPlayerLeftNotice] = useState<{ name: string; duringGame: boolean; forfeit: boolean; theyWon?: boolean; reachedRound: number } | null>(null);
   const { user, refreshSession } = useAuth();
   // Online lobby: browse players who aren't in a room and send/receive game requests
   const [showOnline, setShowOnline] = useState(false);
@@ -216,10 +239,20 @@ export default function JodaMemory() {
     | { status: 'saved'; personalBest: boolean; rank: number | null }
     | null
   >(null);
-  // Flips arrive over the socket; the listener calls the latest applyFlip through this ref to avoid stale state
-  const applyFlipRef = useRef<(cardId: number) => void>(() => {});
+  // Alternate room: the server's latest snapshot, the round just finished (for its dialog) and the last refused action
+  const [altRoom, setAltRoom] = useState<AltRoomState | null>(null);
+  const [altRoundDone, setAltRoundDone] = useState<{ round: number; moves: number; timeMs: number; shown: boolean } | null>(null);
+  const [altError, setAltError] = useState<string | null>(null);
+  // Flips arrive over the socket and are applied one per render, so each one sees the board the previous one left
+  const [flipQueue, setFlipQueue] = useState<{ cardId: number; iconName?: string; own: boolean }[]>([]);
+  // Our own flips sent but not on the board yet; a third tap waits until the first two are showing
+  const pendingFlipsRef = useRef(0);
+  // Rounds this player has finished in the current alternate game (a forfeit counts once it reaches 4)
+  const altRoundsPlayedRef = useRef(0);
   const roundsDealtRef = useRef(0);
 
+  // Both room modes keep a seat on the server; only 'multiplayer' shares one board
+  const isRoomMode = gameMode === 'multiplayer' || gameMode === 'alternate';
   const isMyTurn = gameMode === 'multiplayer' ? currentPlayerIndex === myPlayerIndex : currentPlayerIndex === 0;
   // Solo can always resume; in multiplayer only the player who paused
   const canResume = gameMode !== 'multiplayer' || !pauseOwner || pauseOwner.id === players[myPlayerIndex]?.id;
@@ -335,13 +368,14 @@ export default function JodaMemory() {
   }, [currentPlayerIndex, isMyTurn, gameStarted, gameWon, soundInitialized, moves]);
 
   // Remember the room while we're in it, so stepping out (back, refresh, menu, another page) offers a way back
-  const inRoomNow = gameMode === 'multiplayer' && Boolean(roomId) && (isInLobby || gameStarted);
+  const inRoomNow = isRoomMode && Boolean(roomId) && (isInLobby || gameStarted);
+  const roomHoldMs = gameMode === 'alternate' ? ALT_ROOM_HOLD_MS : undefined;
   useEffect(() => {
     if (!inRoomNow || !roomId) return;
-    saveCurrentRoom(roomId);
-    const refresh = setInterval(() => saveCurrentRoom(roomId), 20000);
+    saveCurrentRoom(roomId, roomHoldMs);
+    const refresh = setInterval(() => saveCurrentRoom(roomId, roomHoldMs), 20000);
     return () => clearInterval(refresh);
-  }, [inRoomNow, roomId]);
+  }, [inRoomNow, roomId, roomHoldMs]);
 
   // Load every picture as soon as a deck is dealt, so a flipped card shows its real picture straight away
   const deckSignature = cards.map(c => c.iconName).join(',');
@@ -393,7 +427,7 @@ export default function JodaMemory() {
 
   // Timer effect
   useEffect(() => {
-    if (gameStarted && !gameWon && !gamePaused) {
+    if (gameStarted && !gameWon && !gamePaused && !altRoundDone) {
       timerRef.current = setInterval(() => {
         setTimer(prev => prev + 1);
       }, 1000);
@@ -406,7 +440,7 @@ export default function JodaMemory() {
         clearInterval(timerRef.current);
       }
     };
-  }, [gameStarted, gameWon, gamePaused]);
+  }, [gameStarted, gameWon, gamePaused, altRoundDone]);
 
   // One socket for the whole Joda Memory page: rooms, and being listed as online when not in a room
   useEffect(() => {
@@ -450,6 +484,8 @@ export default function JodaMemory() {
       });
 
       setCards(mappedCards);
+      setFlipQueue([]);
+      pendingFlipsRef.current = 0;
       setPlayers(data.players);
       setMyPlayerIndex(Math.max(0, data.players.findIndex(p => p.socketId === socket.id)));
       setCurrentPlayerIndex(data.currentPlayerIndex);
@@ -476,8 +512,27 @@ export default function JodaMemory() {
     // Listen for card flipped
     // The server relays every flip to the whole room, including the player who flipped,
     // so both boards apply the same flips in the same order and stay identical
-    socket.on('cardFlipped', (data: { cardId: number; playerId: string }) => {
-      applyFlipRef.current(data.cardId);
+    // Alternate boards: the flip names the picture, and the last pair reports the round's result
+    socket.on('cardFlipped', (data: { cardId: number; playerId: string; iconName?: string; roundDone?: { round: number; moves: number; timeMs: number } | null }) => {
+      setFlipQueue(queue => [...queue, { cardId: data.cardId, iconName: data.iconName, own: data.playerId === socket.id }]);
+      const done = data.roundDone;
+      if (done) {
+        // The server timed the round: stop our clock on its time now, and open the dialog after the match animation
+        setTimer(Math.floor(done.timeMs / 1000));
+        setAltRoundDone({ ...done, shown: false });
+        // Unless the player left in the meantime (that clears it)
+        setTimeout(() => setAltRoundDone(current => (current && current.round === done.round ? { ...current, shown: true } : current)), 1200);
+      }
+    });
+
+    socket.on('altUpdate', (data: Omit<AltRoomState, 'receivedAt'>) => {
+      setAltRoom({ ...data, receivedAt: Date.now() });
+      setLobbyPlayers(data.players);
+      const seat = data.players.findIndex(p => p.socketId === socket.id);
+      if (seat >= 0) {
+        setMyPlayerIndex(seat);
+        altRoundsPlayedRef.current = data.alt?.seats[seat]?.results.length ?? 0;
+      }
     });
 
     // Listen for match found
@@ -506,14 +561,21 @@ export default function JodaMemory() {
     });
 
     // Listen for player left
-    socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean; forfeit?: boolean }) => {
+    socket.on('playerLeft', (data: { playerId: string; playerName?: string; players: LobbyPlayer[]; gameInProgress?: boolean; forfeit?: boolean; winnerId?: string | null }) => {
       setLobbyPlayers(data.players);
       if (data.players.length === 0) {
         handleBackToMenu();
         return;
       }
       setWaitingForName(null);
-      setPlayerLeftNotice({ name: data.playerName || '', duringGame: Boolean(data.gameInProgress), forfeit: Boolean(data.forfeit), reachedRound: roundsDealtRef.current });
+      setPlayerLeftNotice({
+        name: data.playerName || '',
+        duringGame: Boolean(data.gameInProgress),
+        forfeit: Boolean(data.forfeit),
+        // Alternate: the seat that left can still win, when it expired waiting for us
+        theyWon: Boolean(data.forfeit) && data.winnerId === data.playerId,
+        reachedRound: gameMode === 'alternate' ? altRoundsPlayedRef.current : roundsDealtRef.current,
+      });
       if (data.gameInProgress) {
         // The server abandons the game and puts the room back in the lobby; mirror that here
         setGameStarted(false);
@@ -530,6 +592,7 @@ export default function JodaMemory() {
         roundsDealtRef.current = 0;
         setCards([]);
         setFlippedCards([]);
+        setAltRoundDone(null);
       }
     });
 
@@ -628,6 +691,7 @@ export default function JodaMemory() {
       socket.off('allPlayersReady');
       socket.off('gameStarted');
       socket.off('cardFlipped');
+      socket.off('altUpdate');
       socket.off('matchFound');
       socket.off('noMatch');
       socket.off('gameWon');
@@ -756,17 +820,24 @@ export default function JodaMemory() {
       return;
     }
 
-    // Multiplayer flips are applied when the server echoes them back (see 'cardFlipped')
-    if (gameMode === 'multiplayer') {
-      socketRef.current?.emit('cardFlipped', { roomId, cardId });
+    // Room flips are applied when the server echoes them back (see 'cardFlipped')
+    if (isRoomMode) {
+      // The server pairs flips in the order it gets them; a tap ahead of the board would pair different cards there
+      if (flippedCards.length + pendingFlipsRef.current >= 2) return;
+      pendingFlipsRef.current += 1;
+      socketRef.current?.emit('cardFlipped', { roomId, cardId }, (res: { success?: boolean } | undefined) => {
+        if (res && !res.success) pendingFlipsRef.current = Math.max(0, pendingFlipsRef.current - 1);
+      });
       return;
     }
 
     applyFlip(cardId);
   };
 
-  const applyFlip = (cardId: number) => {
-    const card = cards.find(c => c.id === cardId);
+  // `reveal` is the picture an alternate board learns with the flip
+  const applyFlip = (cardId: number, reveal?: string) => {
+    const board = reveal ? cards.map(c => (c.id === cardId ? cardFor(c.id, reveal, c) : c)) : cards;
+    const card = board.find(c => c.id === cardId);
     if (!card || card.isFlipped || card.isMatched || flippedCards.length >= 2) {
       return;
     }
@@ -779,7 +850,7 @@ export default function JodaMemory() {
     const newFlippedCards = [...flippedCards, cardId];
     setFlippedCards(newFlippedCards);
 
-    setCards(cards.map(c =>
+    setCards(board.map(c =>
       c.id === cardId ? { ...c, isFlipped: true } : c
     ));
 
@@ -791,14 +862,14 @@ export default function JodaMemory() {
     // Check for match when 2 cards are flipped
     if (newFlippedCards.length === 2) {
       const [firstId, secondId] = newFlippedCards;
-      const firstCard = cards.find(c => c.id === firstId);
-      const secondCard = cards.find(c => c.id === secondId);
+      const firstCard = board.find(c => c.id === firstId);
+      const secondCard = board.find(c => c.id === secondId);
 
       if (firstCard && secondCard && firstCard.iconName === secondCard.iconName) {
         // Match found
         setTimeout(() => {
           soundManager.play('match');
-          setCards(cards.map(c =>
+          setCards(board.map(c =>
             c.id === firstId || c.id === secondId
               ? { ...c, isMatched: true }
               : c
@@ -813,7 +884,7 @@ export default function JodaMemory() {
           }
 
           // Check for round completion
-          const allMatched = cards.every(c =>
+          const allMatched = board.every(c =>
             c.isMatched || c.id === firstId || c.id === secondId
           );
           if (allMatched) {
@@ -823,6 +894,8 @@ export default function JodaMemory() {
               // In multiplayer mode, complete the round
               if (gameMode === 'multiplayer') {
                 handleRoundComplete();
+              } else if (gameMode === 'alternate') {
+                // The server timed the round; its result arrives with this flip (see 'cardFlipped')
               } else {
                 // Single player mode - just end the game
                 setGameWon(true);
@@ -840,7 +913,7 @@ export default function JodaMemory() {
         // No match
         setTimeout(() => {
           soundManager.play('mismatch');
-          setCards(cards.map(c =>
+          setCards(board.map(c =>
             c.id === firstId || c.id === secondId
               ? { ...c, isFlipped: false }
               : c
@@ -861,8 +934,15 @@ export default function JodaMemory() {
     }
   };
 
-  applyFlipRef.current = applyFlip;
-  rejoinRef.current = { roomId, inRoom: gameMode === 'multiplayer' && (isInLobby || gameStarted) };
+  // One queued flip per render; applyFlip here is this render's, so it sees the state the previous flip left
+  useEffect(() => {
+    const [next, ...rest] = flipQueue;
+    if (!next) return;
+    setFlipQueue(rest);
+    if (next.own) pendingFlipsRef.current = Math.max(0, pendingFlipsRef.current - 1);
+    applyFlip(next.cardId, next.iconName);
+  }, [flipQueue]);
+  rejoinRef.current = { roomId, inRoom: isRoomMode && (isInLobby || gameStarted) };
 
   // Solo times are personal bests on the player's profile; the server needs a session (guest or account) to save them
   const saveSoloRun = async (timeSeconds: number, finalMoves: number) => {
@@ -891,7 +971,7 @@ export default function JodaMemory() {
 
   // AI logic removed - single player is now solo challenge mode
 
-  const handleModeSelect = (mode: 'single' | 'multiplayer') => {
+  const handleModeSelect = (mode: 'single' | 'multiplayer' | 'alternate') => {
     setGameMode(mode);
 
     // For single player mode, setup AI opponent
@@ -956,28 +1036,34 @@ export default function JodaMemory() {
     setSoloSave(null);
     setGamePaused(false);
     setPauseOwner(null);
+    setAltRoom(null);
+    setAltRoundDone(null);
+    setAltError(null);
   };
 
   const handleBackToMode = () => {
-    if (gameMode === 'multiplayer' && roomId && (isInLobby || gameStarted)) {
+    if (isRoomMode && roomId && (isInLobby || gameStarted)) {
       // Stepping out, not leaving: the server holds the seat and the header offers "Return to room"
       // (drop roomId from the address first: the header hides the reminder while the address points at the room)
       const url = new URL(window.location.href);
       url.searchParams.delete('roomId');
       window.history.replaceState({}, '', url.toString());
       setRoomId(null);
-      saveCurrentRoom(roomId);
+      saveCurrentRoom(roomId, roomHoldMs);
       disconnectSocket();
       socketRef.current = connectSocket();
     }
     setGameMode(null);
     setGameStarted(false);
     setIsInLobby(false);
+    setAltRoundDone(null);
   };
 
   const handleStartGame = (selectedDifficulty?: Difficulty) => {
     const diff = selectedDifficulty || difficulty;
     setDifficulty(diff);
+    setGamePaused(false);
+    setAltRoundDone(null);
     setGameStarted(true);
     setGameWon(false);
     setSoloSave(null);
@@ -1017,7 +1103,9 @@ export default function JodaMemory() {
     const { room, game } = response;
     setConnectionError(null);
     setCodeError(null);
-    setGameMode('multiplayer');
+    setFlipQueue([]);
+    pendingFlipsRef.current = 0;
+    setGameMode(room.mode === 'alternate' ? 'alternate' : 'multiplayer');
     setRoomId(room.id);
     setLobbyPlayers(room.players);
     setShowOpponentMoves(room.showOpponentMoves);
@@ -1026,6 +1114,17 @@ export default function JodaMemory() {
       setMyPlayerIndex(seat);
       setIsHost(Boolean(room.players[seat]?.isHost));
       setIsReady(Boolean(room.players[seat]?.isReady));
+    }
+    if (room.mode === 'alternate') {
+      setAltRoom({ id: room.id, players: room.players, difficulty: room.difficulty, gameStarted: room.gameStarted, alt: room.alt ?? null, receivedAt: Date.now() });
+      // Back in the middle of our own round: the server paused it, so the board comes back paused
+      if (response.altBoard) {
+        openAltBoard(response.altBoard);
+      } else {
+        setGameStarted(false);
+        setIsInLobby(true);
+      }
+      return;
     }
     if (!game) {
       setGameStarted(false);
@@ -1063,6 +1162,19 @@ export default function JodaMemory() {
 
   // In multiplayer the server decides (only whoever paused may resume) and its gamePaused broadcast updates both screens
   const requestPause = (paused: boolean) => {
+    // Alternate: the server keeps the round's clock; resuming is the same request as playing the round
+    if (gameMode === 'alternate') {
+      if (!socketRef.current || !roomId) return;
+      if (paused) {
+        socketRef.current.emit('altPause', { roomId }, (res: { success: boolean; error?: string }) => {
+          if (res?.success) setGamePaused(true);
+          else setAltError(altErrorText(res?.error ?? ''));
+        });
+      } else {
+        handleAltPlay();
+      }
+      return;
+    }
     if (gameMode === 'multiplayer') {
       if (socketRef.current && roomId) socketRef.current.emit('togglePause', { roomId, paused });
       return;
@@ -1127,12 +1239,15 @@ export default function JodaMemory() {
 
     try {
       const socket = socketRef.current;
-      socket.emit('createGame', { playerName: playerName.trim(), difficulty, playerKey: getPlayerKey() }, (response: any) => {
+      const mode = gameMode === 'alternate' ? 'alternate' : 'classic';
+      socket.emit('createGame', { playerName: playerName.trim(), difficulty, playerKey: getPlayerKey(), mode }, (response: any) => {
         if (response.success) {
           setRoomId(response.roomId);
           setIsInLobby(true);
           setIsHost(true);
+          setMyPlayerIndex(0);
           setLobbyPlayers(response.room.players);
+          if (mode === 'alternate') setAltRoom({ ...response.room, receivedAt: Date.now() });
           setShowOpponentMoves(response.room.showOpponentMoves);
           saveDisplayName(playerName.trim());
 
@@ -1178,6 +1293,15 @@ export default function JodaMemory() {
           setIsInLobby(true);
           setIsHost(false);
           setLobbyPlayers(response.room.players);
+          // The link or code doesn't say which kind of room it is; the server's answer does
+          const seat = response.room.players.findIndex((p: LobbyPlayer) => p.socketId === socket.id);
+          if (seat >= 0) setMyPlayerIndex(seat);
+          if (response.room.mode === 'alternate') {
+            setGameMode('alternate');
+            setAltRoom({ ...response.room, receivedAt: Date.now() });
+          } else {
+            setGameMode('multiplayer');
+          }
           setShowOpponentMoves(response.room.showOpponentMoves);
           saveDisplayName(playerName.trim());
 
@@ -1219,6 +1343,66 @@ export default function JodaMemory() {
         setStartError(res.error ?? '');
       }
     });
+  };
+
+  // Lays out this player's own alternate board from the server's copy: only cards already turned up are named
+  const openAltBoard = (board: AltBoard) => {
+    const revealed = new Map(board.revealed.map(r => [r.id, r.iconName]));
+    const matched = new Set(board.matched);
+    const flipped = new Set(board.flipped);
+    setCards(Array.from({ length: board.cardCount }, (_, id) =>
+      cardFor(id, revealed.get(id) ?? '', { isMatched: matched.has(id), isFlipped: flipped.has(id) }),
+    ));
+    // Preload the round's pictures; the list is sorted, so it says nothing about where they are
+    board.pictures.forEach(name => {
+      const url = IMAGE_POOL.find(img => img.name === name)?.imageUrl;
+      if (url) new Image().src = url;
+    });
+    setDifficulty(difficultyForCards(board.cardCount));
+    setFlippedCards(board.flipped);
+    setFlipQueue([]);
+    pendingFlipsRef.current = 0;
+    setMoves(board.moves);
+    setTimer(Math.floor(board.elapsedMs / 1000));
+    setCurrentRound(board.round);
+    setCurrentPlayerIndex(0);
+    setGamePaused(!board.running);
+    setPauseOwner(null);
+    setGameWon(false);
+    setAltRoundDone(null);
+    setIsInLobby(false);
+    setGameStarted(true);
+  };
+
+  const handleAltPlay = () => {
+    if (!socketRef.current || !roomId) return;
+    setAltError(null);
+    socketRef.current.emit('altPlay', { roomId }, (res: { success: boolean; board?: AltBoard; error?: string }) => {
+      if (res?.success && res.board) {
+        openAltBoard(res.board);
+        if (soundInitialized) getSoundManager().play('myTurn');
+      } else {
+        setAltError(res?.error ? altErrorText(res.error) : t('startFailed'));
+      }
+    });
+  };
+
+  // Level changes, confirmations and rematches come back to both players as 'altUpdate'
+  const emitAlt = (event: 'altSetDifficulty' | 'altReady' | 'altRematch', payload: Record<string, unknown> = {}) => {
+    if (!socketRef.current || !roomId) return;
+    setAltError(null);
+    socketRef.current.emit(event, { roomId, ...payload }, (res: { success: boolean; error?: string }) => {
+      if (res && !res.success) setAltError(res.error ? altErrorText(res.error) : t('startFailed'));
+    });
+  };
+
+  // From the round dialog back to the score table
+  const handleAltBackToScores = () => {
+    setAltRoundDone(null);
+    setGameStarted(false);
+    setIsInLobby(true);
+    setCards([]);
+    setFlippedCards([]);
   };
 
   const handleSendMessage = () => {
@@ -1271,6 +1455,13 @@ export default function JodaMemory() {
       'Game has already started': t('errStarted'),
       'Too many requests': t('errTooMany'),
     })[error] ?? error;
+  const altErrorText = (error: string) =>
+    ({
+      '': t('startFailed'),
+      'Not your turn': ta('errNotYourTurn'),
+      'No round in progress': ta('errNoRound'),
+      'Room not found': t('startRoomGone'),
+    })[error] ?? knownError(error);
   const startErrorText = (error: string) =>
     ({
       '': t('startFailed'),
@@ -1285,6 +1476,36 @@ export default function JodaMemory() {
       : /full/i.test(error ?? '')
         ? t('roomFullBody')
         : error ? knownError(error) : t('codeJoinFailed');
+
+  // Shown in both room lobbies after the other player left
+  const playerLeftBanner = playerLeftNotice && (
+    <div role="status" className="flex items-start justify-between gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-signal/60">
+                  <div>
+                    <p className="font-semibold">
+                      {t(playerLeftNotice.duringGame ? 'leftGame' : 'leftRoom', { name: playerLeftNotice.name || t('yourFriend') })}
+                    </p>
+                    <p className="mt-1 text-sm text-chalk">
+                      {playerLeftNotice.theyWon
+                        ? ta('seatExpiredTheyWin', { name: playerLeftNotice.name || ta('yourFriend') })
+                        : playerLeftNotice.forfeit
+                        ? playerLeftNotice.reachedRound >= 4
+                        ? t('forfeitCounts')
+                        : t('forfeitNotCounted')
+                        : playerLeftNotice.duringGame
+                        ? t('endedBeforeFlip')
+                        : t('sendLinkAgain')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPlayerLeftNotice(null)}
+                    className="btn-quiet btn-sm min-h-11 shrink-0"
+                    aria-label={t('dismiss')}
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                </div>
+  );
 
   return (
     <div className="min-h-screen">
@@ -1313,7 +1534,7 @@ export default function JodaMemory() {
                 <dt className="text-chalk">{t('moves')}</dt>
                 <dd className="font-display text-lg font-bold tabular-nums">{moves}</dd>
               </div>
-              {gameMode === 'multiplayer' ? (
+              {isRoomMode ? (
                 <div className="flex items-baseline gap-1.5">
                   <dt className="text-chalk">{t('round')}</dt>
                   <dd className="font-display text-lg font-bold tabular-nums">{currentRound}</dd>
@@ -1350,8 +1571,47 @@ export default function JodaMemory() {
           </div>
         )}
 
+        {/* Alternate: your own board; above it, the other player's progress */}
+        {gameStarted && gameMode === 'alternate' && altRoom && (
+          <AltOpponentLine room={altRoom} mySeat={myPlayerIndex} round={currentRound} />
+        )}
+
+        {/* Alternate: round cleared */}
+        {altRoundDone?.shown && gameMode === 'alternate' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-felt-deep/80 p-4">
+            <div role="dialog" aria-modal="true" aria-labelledby="alt-round-title" className="panel w-full max-w-sm p-6 shadow-lift">
+              <h2 id="alt-round-title" className="title-lg">{ta('roundDoneTitle', { round: altRoundDone.round })}</h2>
+              <dl className="mt-4 space-y-1 text-chalk">
+                <div className="flex justify-between gap-4">
+                  <dt>{t('moves')}</dt>
+                  <dd className="font-semibold tabular-nums text-white">{altRoundDone.moves}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt>{t('time')}</dt>
+                  <dd className="font-semibold tabular-nums text-white">{formatAltTime(altRoundDone.timeMs)}</dd>
+                </div>
+              </dl>
+              <p className="mt-4 text-chalk">
+                {altRoundDone.round >= (altRoom?.alt?.rounds ?? 4)
+                  ? ta('roundDoneLast')
+                  : altRoom?.alt?.seats[myPlayerIndex]?.canPlay
+                    ? ta('roundDoneNext', { round: altRoundDone.round + 1 })
+                    : ta('roundDoneWait', {
+                        name: altRoom?.players[myPlayerIndex === 0 ? 1 : 0]?.name || ta('yourFriend'),
+                        round: altRoundDone.round,
+                      })}
+              </p>
+              <div className="mt-6 flex flex-col gap-2">
+                <button type="button" onClick={handleAltBackToScores} className="btn-gold" autoFocus>
+                  {ta('backToScores')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Scoreboard */}
-        {gameStarted && (
+        {gameStarted && gameMode !== 'alternate' && (
           <section aria-label={t('scoreboard')} className="mx-auto mb-4 max-w-3xl md:mb-6">
             <p className="sr-only" aria-live="polite">
               {currentPlayer && !gameWon ? turnLabel(currentPlayerIndex) : ''}
@@ -1585,8 +1845,20 @@ export default function JodaMemory() {
 
               <button
                 type="button"
+                onClick={() => handleModeSelect('alternate')}
+                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift"
+              >
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
+                  <Repeat className="h-6 w-6" aria-hidden="true" />
+                </span>
+                <span className="title-md">{ta('playAlternate')}</span>
+                <span className="text-sm text-ink-soft">{ta('playAlternateDesc')}</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowOnline(true)}
-                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift sm:col-span-2"
+                className="flex flex-col items-start gap-3 rounded-card bg-card p-5 text-left text-ink shadow-rest ring-1 ring-black/5 transition hover:shadow-lift"
               >
                 <span className="flex w-full items-center justify-between gap-3">
                   <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-felt text-gold">
@@ -1607,11 +1879,11 @@ export default function JodaMemory() {
             )}
           </section>
         ) : !gameStarted ? (
-          gameMode === 'multiplayer' && !isInLobby ? (
+          isRoomMode && !isInLobby ? (
             /* Multiplayer Name Input */
             <section aria-labelledby="memory-name-title" className="max-w-md">
               <h2 id="memory-name-title" className="title-md mb-4">
-                {roomId ? t('joinFriendTitle') : t('createRoomTitle')}
+                {roomId ? t('joinFriendTitle') : gameMode === 'alternate' ? ta('createTitle') : t('createRoomTitle')}
               </h2>
 
               {connectionError && (
@@ -1695,7 +1967,7 @@ export default function JodaMemory() {
                   </button>
                 </div>
 
-                {!roomId && (
+                {!roomId && gameMode === 'multiplayer' && (
                   <form
                     className="mt-6 border-t border-white/10 pt-5"
                     onSubmit={(e) => {
@@ -1744,6 +2016,22 @@ export default function JodaMemory() {
                 )}
               </div>
             </section>
+          ) : gameMode === 'alternate' && isInLobby && altRoom ? (
+            <div className="space-y-4">
+            {playerLeftBanner}
+            <AlternateRoom
+              room={altRoom}
+              mySeat={myPlayerIndex}
+              copiedLink={copiedLink}
+              error={altError}
+              onCopyLink={handleCopyRoomLink}
+              onSetDifficulty={(value) => emitAlt('altSetDifficulty', { difficulty: value })}
+              onReady={(ready) => emitAlt('altReady', { ready })}
+              onPlay={handleAltPlay}
+              onRematch={() => emitAlt('altRematch')}
+              onLeave={handleBackToMenu}
+            />
+            </div>
           ) : gameMode === 'multiplayer' && isInLobby ? (
             /* Multiplayer Lobby */
             <section aria-labelledby="memory-lobby-title" className="max-w-2xl space-y-4">
@@ -1751,32 +2039,7 @@ export default function JodaMemory() {
 
               {waitingForName !== null && <ReconnectingNotice name={waitingForName || t('yourFriend')} />}
 
-              {playerLeftNotice && (
-                <div role="status" className="flex items-start justify-between gap-3 rounded-2xl bg-felt-deep p-4 ring-1 ring-inset ring-signal/60">
-                  <div>
-                    <p className="font-semibold">
-                      {t(playerLeftNotice.duringGame ? 'leftGame' : 'leftRoom', { name: playerLeftNotice.name || t('yourFriend') })}
-                    </p>
-                    <p className="mt-1 text-sm text-chalk">
-                      {playerLeftNotice.forfeit
-                        ? playerLeftNotice.reachedRound >= 4
-                        ? t('forfeitCounts')
-                        : t('forfeitNotCounted')
-                        : playerLeftNotice.duringGame
-                        ? t('endedBeforeFlip')
-                        : t('sendLinkAgain')}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPlayerLeftNotice(null)}
-                    className="btn-quiet btn-sm min-h-11 shrink-0"
-                    aria-label={t('dismiss')}
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                </div>
-              )}
+              {playerLeftBanner}
 
               {/* Room Code */}
               <div className="panel p-5">
@@ -2041,7 +2304,7 @@ export default function JodaMemory() {
                 return (
                 <button
                   // Keyed by picture too: a new deal remounts the slot instead of reusing an element still showing the old picture
-                  key={`${card.id}-${card.iconName}`}
+                  key={gameMode === 'alternate' ? `alt-${currentRound}-${card.id}` : `${card.id}-${card.iconName}`}
                   type="button"
                   onClick={() => handleCardClick(card.id)}
                   disabled={card.isMatched || card.isFlipped || !isMyTurn}
@@ -2133,6 +2396,10 @@ export default function JodaMemory() {
               })}
             </div>
 
+            {gameMode === 'alternate' && altError && (
+              <p role="alert" className="mx-auto mt-4 max-w-3xl text-sm text-white">{altError}</p>
+            )}
+
             {/* Game Controls */}
             <div className="mx-auto mt-5 flex max-w-3xl flex-wrap items-center gap-2">
               {gameStarted && !gameWon && (
@@ -2146,7 +2413,7 @@ export default function JodaMemory() {
                 </button>
               )}
               {/* In multiplayer new cards only come from "Next round"; the server rejects mid-round deals */}
-              {gameMode !== 'multiplayer' && (
+              {gameMode === 'single' && (
                 <button
                   onClick={handleRestart}
                   className="btn-quiet btn-sm min-h-11"
@@ -2192,6 +2459,11 @@ export default function JodaMemory() {
                   title: th('friendTitle'),
                   steps: [th('friend1'), th('friend2'), th('friend3'), th('friend4'), th('friend5')],
                   note: th('friendOnline'),
+                },
+                {
+                  id: 'alternate',
+                  title: th('alternateTitle'),
+                  steps: [th('alternate1'), th('alternate2'), th('alternate3'), th('alternate4'), th('alternate5'), th('alternate6')],
                 },
                 { id: 'rounds', title: th('roundsTitle'), items: [th('rounds1'), th('rounds2'), th('rounds3'), th('rounds4'), th('rounds5')] },
                 { id: 'options', title: th('optionsTitle'), items: [th('options1'), th('options2')] },
@@ -2456,13 +2728,16 @@ type RejoinResponse =
       success: true;
       room: {
         id: string;
+        mode?: 'classic' | 'alternate';
         players: LobbyPlayer[];
         difficulty: Difficulty;
         showOpponentMoves: boolean;
         gameStarted: boolean;
         pausedById?: string | null;
         pausedByName?: string | null;
+        alt?: AltRoomState['alt'];
       };
+      altBoard?: AltBoard | null;
       game: null | {
         cards: { iconName: string }[];
         matched: number[];
@@ -2473,6 +2748,19 @@ type RejoinResponse =
         currentRound: number;
       };
     };
+
+// This player's own alternate board, as the server sends it
+type AltBoard = {
+  round: number;
+  cardCount: number;
+  pictures: string[];
+  revealed: { id: number; iconName: string }[];
+  matched: number[];
+  flipped: number[];
+  moves: number;
+  elapsedMs: number;
+  running: boolean;
+};
 
 // A random id per browser so the server can hand our seat back after a drop, reload or new tab.
 // Each device has its own, so two devices on the same account are always two different players.

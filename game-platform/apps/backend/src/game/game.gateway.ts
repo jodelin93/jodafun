@@ -11,9 +11,20 @@ import { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveSessionUser, type SessionUser } from '../auth/session';
-import { RoomStore, type Difficulty, type GameRoom, type Player } from './room-store';
+import { RoomStore, type Difficulty, type GameRoom, type Player, type RoomMode } from './room-store';
 import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
 import { PresenceState, presenceName, type PresenceEntry } from './presence';
+import {
+  ALT_ROUNDS,
+  altRoundWins,
+  flipCard,
+  newAltGame,
+  pauseBoard,
+  playRound,
+  privateAltBoard,
+  publicAltState,
+  seatTotals,
+} from './alternate';
 
 // Pairs dealt per difficulty; a deck must contain exactly twice this many cards
 export const PAIRS_BY_DIFFICULTY = { easy: 4, medium: 8, hard: 12 } as const;
@@ -27,11 +38,14 @@ const PRESENCE_EMIT_INTERVAL_MS = 1000;
 const isDifficulty = (value: unknown): value is Difficulty =>
   value === 'easy' || value === 'medium' || value === 'hard';
 
-// How long a disconnected player keeps their seat before being removed
-const graceMs = (gameInProgress: boolean) =>
-  gameInProgress
-    ? Number(process.env.ROOM_GRACE_GAME_MS) || 60_000
-    : Number(process.env.ROOM_GRACE_LOBBY_MS) || 5 * 60_000;
+// How long a disconnected player keeps their seat before being removed. Alternate games are played
+// at different times, so their seats are held for a day.
+const graceMs = (room: GameRoom) =>
+  room.mode === 'alternate'
+    ? Number(process.env.ROOM_GRACE_ALT_MS) || 24 * 60 * 60_000
+    : room.gameStarted && room.gameActive
+      ? Number(process.env.ROOM_GRACE_GAME_MS) || 60_000
+      : Number(process.env.ROOM_GRACE_LOBBY_MS) || 5 * 60_000;
 
 @WebSocketGateway({
   cors: {
@@ -98,6 +112,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         player.disconnectedAt = now;
       }
     }
+    // Nobody is at a board any more; the clock stopped when the previous process last saved
+    room.alt?.seats.forEach(seat => seat.board && pauseBoard(seat.board, Math.max(room.updatedAt, seat.board.runningSince ?? 0)));
     this.rooms.save(room);
     room.players.forEach(player => this.startGraceTimer(room, player));
   }
@@ -153,8 +169,13 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         players: this.publicPlayers(room),
       });
 
+      // An alternate round's clock stops while its player is away
+      const board = room.alt?.seats[room.players.indexOf(player)]?.board;
+      if (board) pauseBoard(board, Date.now());
+
       this.startGraceTimer(room, player);
       this.rooms.save(room);
+      if (room.mode === 'alternate') this.emitAltUpdate(room);
     }
     this.schedulePresenceChanged();
   }
@@ -206,6 +227,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     player.userId = userId;
     if (typeof playerKey === 'string' && playerKey) player.playerKey = playerKey;
     client.join(roomId);
+    // Coming back to an alternate round finds it paused, so time spent reloading never counts
+    const seat = room.players.indexOf(player);
+    const board = room.alt?.seats[seat]?.board;
+    if (board) pauseBoard(board, Date.now());
     this.rooms.save(room);
     this.onSeated(client.id);
 
@@ -214,6 +239,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       playerName: player.name,
       players: this.publicPlayers(room),
     });
+    // The alternate screen draws from altUpdate (and the board above may just have been paused)
+    if (room.mode === 'alternate') this.emitAltUpdate(room);
 
     console.log(`Player ${player.name} rejoined room ${roomId}`);
 
@@ -222,15 +249,18 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       rejoined: true,
       room: {
         id: room.id,
+        mode: room.mode ?? 'classic',
         players: this.publicPlayers(room),
         difficulty: room.difficulty,
         showOpponentMoves: room.showOpponentMoves,
         gameStarted: room.gameStarted,
         pausedById: room.pausedBy ?? null,
         pausedByName: room.players.find(p => p.id === room.pausedBy)?.name ?? null,
+        alt: room.alt ? publicAltState(room.alt, Date.now()) : null,
       },
+      altBoard: room.alt ? privateAltBoard(room.alt, seat, Date.now()) : null,
       game:
-        room.gameStarted && room.cards.length > 0
+        room.mode !== 'alternate' && room.gameStarted && room.cards.length > 0
           ? {
               cards: room.cards.map(c => ({ iconName: c.iconName })),
               matched: [...room.matchedCards],
@@ -247,13 +277,14 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   @SubscribeMessage('createGame')
   async handleCreateGame(
     @MessageBody()
-    data: { playerName: string; difficulty: Difficulty; playerKey?: string },
+    data: { playerName: string; difficulty: Difficulty; playerKey?: string; mode?: RoomMode },
     @ConnectedSocket() client: Socket,
   ) {
     if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
     const difficulty = isDifficulty(data?.difficulty) ? data.difficulty : 'easy';
     const userId = await this.getSocketUserId(client.id);
-    const room = this.openRoom(client, data.playerName, userId, data.playerKey, difficulty);
+    const mode: RoomMode = data?.mode === 'alternate' ? 'alternate' : 'classic';
+    const room = this.openRoom(client, data.playerName, userId, data.playerKey, difficulty, mode);
     const roomId = room.id;
 
     console.log(`Game created: ${roomId} by ${data.playerName}`);
@@ -272,6 +303,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     userId: string | null,
     playerKey: unknown,
     difficulty: Difficulty,
+    mode: RoomMode = 'classic',
   ): GameRoom {
     const roomId = generateRoomCode(code => this.rooms.has(code));
     const now = Date.now();
@@ -295,6 +327,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       totalPairs: [0, 0],
       gameDifficulty: difficulty,
       gameStartedAt: null,
+      mode,
+      alt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -369,6 +403,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       player: this.publicPlayer(player),
       players: this.publicPlayers(room),
     });
+    if (room.mode === 'alternate') this.emitAltUpdate(room);
 
     console.log(`${data.playerName} joined game: ${roomId}`);
 
@@ -427,6 +462,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       return { success: false, error: 'Room not found' };
     }
 
+    if (room.mode === 'alternate') {
+      return { success: false, error: 'Alternate games start when both players are ready' };
+    }
+
     if (room.hostId !== client.id) {
       return { success: false, error: 'Only host can start the game' };
     }
@@ -482,6 +521,166 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     });
 
     return { success: true };
+  }
+
+  // Alternate rooms: either player can change the level before the game; both then confirm it again
+  @SubscribeMessage('altSetDifficulty')
+  handleAltSetDifficulty(
+    @MessageBody() data: { roomId: string; difficulty: Difficulty },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = this.altRoomOf(data?.roomId, client.id);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.gameStarted) return { success: false, error: 'Game has already started' };
+    if (!isDifficulty(data?.difficulty)) return { success: false, error: 'Invalid level' };
+
+    if (room.difficulty !== data.difficulty) {
+      room.difficulty = data.difficulty;
+      room.players.forEach(p => {
+        p.isReady = false;
+      });
+      this.rooms.save(room);
+      this.emitAltUpdate(room);
+    }
+    return { success: true };
+  }
+
+  // The game starts as soon as both players have confirmed the level; they don't need to be online together
+  @SubscribeMessage('altReady')
+  handleAltReady(
+    @MessageBody() data: { roomId: string; ready: boolean },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const room = this.altRoomOf(data?.roomId, client.id);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (room.gameStarted) return { success: false, error: 'Game has already started' };
+
+    const player = room.players.find(p => p.socketId === client.id)!;
+    player.isReady = data?.ready === true;
+    if (room.players.length === 2 && room.players.every(p => p.isReady)) {
+      room.alt = newAltGame(PAIRS_BY_DIFFICULTY[room.difficulty]);
+      room.gameStarted = true;
+      room.gameActive = true;
+      room.gameHasFlips = false;
+      room.gameDifficulty = room.difficulty;
+      room.gameStartedAt = new Date();
+    }
+    this.rooms.save(room);
+    this.emitAltUpdate(room);
+    return { success: true };
+  }
+
+  // Starts this player's next round, or resumes the one they paused; answers with their own board
+  @SubscribeMessage('altPlay')
+  handleAltPlay(@MessageBody() data: { roomId: string }, @ConnectedSocket() client: Socket) {
+    const room = this.altRoomOf(data?.roomId, client.id);
+    if (!room?.alt) return { success: false, error: 'Room not found' };
+    const seat = room.players.findIndex(p => p.socketId === client.id);
+    const now = Date.now();
+    if (!playRound(room.alt, seat, now)) return { success: false, error: 'Not your turn' };
+
+    this.rooms.save(room);
+    this.emitAltUpdate(room);
+    return { success: true, board: privateAltBoard(room.alt, seat, now) };
+  }
+
+  @SubscribeMessage('altPause')
+  handleAltPause(@MessageBody() data: { roomId: string }, @ConnectedSocket() client: Socket) {
+    const room = this.altRoomOf(data?.roomId, client.id);
+    const board = room?.alt?.seats[room.players.findIndex(p => p.socketId === client.id)]?.board;
+    if (!room || !board) return { success: false, error: 'No round in progress' };
+
+    pauseBoard(board, Date.now());
+    this.rooms.save(room);
+    this.emitAltUpdate(room);
+    return { success: true };
+  }
+
+  // After a finished game, either player can send the room back to the level choice
+  @SubscribeMessage('altRematch')
+  handleAltRematch(@MessageBody() data: { roomId: string }, @ConnectedSocket() client: Socket) {
+    const room = this.altRoomOf(data?.roomId, client.id);
+    if (!room) return { success: false, error: 'Room not found' };
+    if (!room.alt?.finished) return { success: false, error: 'Game in progress' };
+
+    this.resetGameState(room);
+    room.alt = null;
+    room.gameStarted = false;
+    room.players.forEach(p => {
+      p.isReady = false;
+    });
+    this.rooms.save(room);
+    this.emitAltUpdate(room);
+    return { success: true };
+  }
+
+  // Flips are echoed only to the player at that board, with the picture, so the other player never sees the deck
+  private flipAltCard(room: GameRoom, client: Socket, cardId: unknown) {
+    const seat = room.players.findIndex(p => p.socketId === client.id);
+    const alt = room.alt;
+    if (!alt || seat === -1) return { success: false, error: 'Not your turn' };
+    const flip = flipCard(alt, seat, cardId, Date.now());
+    if (!flip) return { success: false, error: 'Invalid card' };
+
+    room.gameHasFlips = true;
+    if (alt.finished) room.gameActive = false;
+    this.rooms.save(room);
+    client.emit('cardFlipped', { cardId, playerId: client.id, iconName: flip.iconName, roundDone: flip.roundDone ?? null });
+    // Progress (moves, pairs, results) only changes once a pair has been turned over
+    if (flip.pair) this.emitAltUpdate(room);
+    if (alt.finished && alt.winnerIndex !== null) {
+      this.saveAltResult(room, alt.winnerIndex).catch(error =>
+        console.error(`Failed to save alternate game for room ${room.id}:`, error),
+      );
+    }
+    return { success: true };
+  }
+
+  // Players of an alternate game are rarely online together, so who stayed connected says nothing.
+  // Quitting loses. When a seat expires, the player holding the game up loses: the one with fewer
+  // rounds played. With equal rounds nobody was waiting on anyone, and the game ends without a result.
+  private altForfeitWinner(room: GameRoom, leavingIndex: number, quit: boolean): Player | null {
+    const otherIndex = leavingIndex === 0 ? 1 : 0;
+    if (quit) return room.players[otherIndex];
+    const played = room.alt!.seats.map(s => s.results.length);
+    if (played[leavingIndex] === played[otherIndex]) return null;
+    return room.players[played[leavingIndex] < played[otherIndex] ? otherIndex : leavingIndex];
+  }
+
+  // The alternate room this socket is seated in
+  private altRoomOf(roomId: unknown, socketId: string): GameRoom | undefined {
+    const room = this.rooms.get(normalizeRoomCode(roomId));
+    if (room?.mode !== 'alternate' || !room.players.some(p => p.socketId === socketId)) return undefined;
+    return room;
+  }
+
+  private emitAltUpdate(room: GameRoom) {
+    this.server.to(room.id).emit('altUpdate', {
+      id: room.id,
+      players: this.publicPlayers(room),
+      difficulty: room.difficulty,
+      gameStarted: room.gameStarted,
+      alt: room.alt ? publicAltState(room.alt, Date.now()) : null,
+    });
+  }
+
+  // Snapshots the game synchronously, so the room can be reset right after this call
+  private saveAltResult(room: GameRoom, winnerIndex: number, forfeit = false) {
+    const alt = room.alt!;
+    const totals = alt.seats.map(seatTotals);
+    const pairs = PAIRS_BY_DIFFICULTY[room.gameDifficulty];
+    return this.saveGameResult(
+      [...room.players],
+      winnerIndex,
+      altRoundWins(alt),
+      alt.seats.map(s => s.results.length * pairs),
+      room.gameDifficulty,
+      room.gameStartedAt ?? new Date(),
+      // A forfeit counts the rounds the player who stayed got through
+      forfeit ? alt.seats[winnerIndex].results.length : ALT_ROUNDS,
+      forfeit,
+      { mode: 'alternate', moves: totals.map(t => t.moves), timeMs: totals.map(t => t.timeMs) },
+    );
   }
 
   @SubscribeMessage('toggleOpponentMoves')
@@ -607,6 +806,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (room.pausedBy) {
       return { success: false, error: 'Game paused' };
     }
+
+    if (room.mode === 'alternate') return this.flipAltCard(room, client, data?.cardId);
 
     const playerIndex = room.players.findIndex(p => p.socketId === client.id);
     if (!room.roundActive || playerIndex === -1 || playerIndex !== room.currentPlayerIndex) {
@@ -739,13 +940,14 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
     // Leave the socket room, then remove the player and notify the others
     client.leave(roomId);
-    this.removePlayer(roomId, room, client.id);
+    this.removePlayer(roomId, room, client.id, true);
 
     return { success: true };
   }
 
   // Shared by leaveRoom and the grace timer
-  private removePlayer(roomId: string, room: GameRoom, socketId: string) {
+  // `quit` is an explicit leaveRoom; otherwise the seat's grace period ran out
+  private removePlayer(roomId: string, room: GameRoom, socketId: string, quit = false) {
     room.pausedBy = null;
     const playerIndex = room.players.findIndex(p => p.socketId === socketId);
     if (playerIndex === -1) return;
@@ -753,16 +955,23 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     const leavingPlayer = room.players[playerIndex];
     this.clearGraceTimer(leavingPlayer);
     const gameInProgress = room.gameStarted && room.gameActive;
+    const alt = room.alt;
 
     // Leaving an active game after the first flip forfeits it to the player who stayed.
     // If both are gone, the one who disconnected later counts as having stayed.
     let winner: Player | null = null;
-    if (gameInProgress && room.gameHasFlips && room.players.length === 2) {
+    if (alt && gameInProgress && room.gameHasFlips && room.players.length === 2) {
+      winner = this.altForfeitWinner(room, playerIndex, quit);
+    } else if (gameInProgress && room.gameHasFlips && room.players.length === 2) {
       const other = room.players[playerIndex === 0 ? 1 : 0];
       const leftAt = leavingPlayer.disconnectedAt ?? Date.now();
       if (other.connected || (other.disconnectedAt ?? 0) > leftAt) winner = other;
     }
-    if (winner) {
+    if (winner && alt) {
+      this.saveAltResult(room, room.players.indexOf(winner), true).catch(error =>
+        console.error(`Failed to save alternate forfeit for room ${roomId}:`, error),
+      );
+    } else if (winner) {
       const startedAt = room.gameStartedAt ?? new Date();
       this.saveGameResult(
         [...room.players],
@@ -782,6 +991,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (room.gameStarted) {
       this.resetGameState(room);
       room.gameStarted = false;
+      room.alt = null;
       room.cards = [];
       room.players.forEach(p => {
         p.isReady = false;
@@ -814,6 +1024,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         });
       }
       this.rooms.save(room);
+      if (room.mode === 'alternate') this.emitAltUpdate(room);
     }
 
     console.log(`Player ${leavingPlayer.name} left room ${roomId}`);
@@ -984,6 +1195,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     for (const room of this.rooms.values()) {
       for (const p of room.players) {
         seatedSockets.add(p.socketId);
+        // An alternate seat is held for a day; while its player is away it doesn't hide them from the list
+        if (room.mode === 'alternate' && !p.connected) continue;
         if (p.playerKey) heldKeys.add(p.playerKey);
         if (p.userId) heldUsers.add(p.userId);
       }
@@ -1076,6 +1289,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     startedAt: Date,
     roundsPlayed: number,
     forfeit = false,
+    extraSettings: Record<string, unknown> = {},
   ) {
     // Only head-to-head games count
     if (players.length !== 2) return;
@@ -1092,7 +1306,13 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         player2Id: userIds[1],
         winnerId: userIds[winnerIndex],
         // roundsPlayed includes tied rounds; the leaderboard only counts games that reached round 4
-        settings: forfeit ? { difficulty, roundWins, roundsPlayed, forfeit: true } : { difficulty, roundWins, roundsPlayed },
+        settings: {
+          ...extraSettings,
+          difficulty,
+          roundWins,
+          roundsPlayed,
+          ...(forfeit ? { forfeit: true } : {}),
+        },
         startedAt,
         completedAt: new Date(),
         matchHistory: {
@@ -1151,7 +1371,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       if (this.rooms.get(room.id) === room && room.players.includes(player) && !player.connected) {
         this.removePlayer(room.id, room, player.socketId);
       }
-    }, graceMs(room.gameStarted && room.gameActive));
+    }, graceMs(room));
     this.graceTimers.set(player, timer);
   }
 
@@ -1184,6 +1404,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   private sanitizeRoom(room: GameRoom) {
     return {
       id: room.id,
+      mode: room.mode ?? 'classic',
+      alt: room.alt ? publicAltState(room.alt, Date.now()) : null,
       players: this.publicPlayers(room),
       difficulty: room.difficulty,
       gameStarted: room.gameStarted,

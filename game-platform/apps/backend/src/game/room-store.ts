@@ -2,6 +2,35 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
+// classic: both players share one board and take turns; alternate: each clears the same decks on their own board
+export type RoomMode = 'classic' | 'alternate';
+
+export interface AltRoundResult {
+  moves: number;
+  timeMs: number;
+}
+
+// One player's board in an alternate game
+export interface AltBoard {
+  round: number; // 0-based index into AltGame.decks
+  matched: number[];
+  flipped: number[];
+  moves: number;
+  elapsedMs: number; // play time banked while the clock was running
+  runningSince: number | null; // epoch ms the clock last started; null while paused
+}
+
+export interface AltSeat {
+  results: AltRoundResult[]; // completed rounds, in order
+  board: AltBoard | null; // the round being played, if any
+}
+
+export interface AltGame {
+  decks: { iconName: string }[][]; // the same decks for both players, one per round
+  seats: AltSeat[]; // indexed like room.players
+  finished: boolean;
+  winnerIndex: number | null; // null when finished as a draw
+}
 
 export interface Player {
   id: string;
@@ -38,6 +67,8 @@ export interface GameRoom {
   totalPairs: number[]; // pairs per player across the whole game
   gameDifficulty: Difficulty;
   gameStartedAt: Date | null;
+  mode?: RoomMode; // missing on rooms saved before alternate games existed (= classic)
+  alt?: AltGame | null; // alternate games only; private decks are never sent to clients
   createdAt: number;
   updatedAt: number;
 }

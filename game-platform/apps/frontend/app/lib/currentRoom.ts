@@ -1,11 +1,12 @@
 // Remembers the multiplayer room this browser is sitting in, so a player who navigates away by accident
-// can get back while the server still holds their seat (5 minutes in the lobby, 60 seconds mid-game).
+// can get back while the server still holds their seat (5 minutes in the lobby, 60 seconds mid-game,
+// a day in an alternate room).
 
 const KEY = 'joda-current-room';
 const CHANGE_EVENT = 'joda-current-room';
 const HOLD_MS = 5 * 60 * 1000;
 
-export type CurrentRoom = { roomId: string; savedAt: number };
+export type CurrentRoom = { roomId: string; savedAt: number; holdMs?: number };
 
 export function readCurrentRoom(): CurrentRoom | null {
   try {
@@ -13,7 +14,8 @@ export function readCurrentRoom(): CurrentRoom | null {
     if (!raw) return null;
     const value = JSON.parse(raw);
     if (typeof value?.roomId !== 'string' || typeof value?.savedAt !== 'number') return null;
-    if (Date.now() - value.savedAt > HOLD_MS) {
+    const holdMs = typeof value.holdMs === 'number' ? value.holdMs : HOLD_MS;
+    if (Date.now() - value.savedAt > holdMs) {
       localStorage.removeItem(KEY);
       return null;
     }
@@ -23,9 +25,9 @@ export function readCurrentRoom(): CurrentRoom | null {
   }
 }
 
-export function saveCurrentRoom(roomId: string) {
+export function saveCurrentRoom(roomId: string, holdMs = HOLD_MS) {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ roomId, savedAt: Date.now() }));
+    localStorage.setItem(KEY, JSON.stringify({ roomId, savedAt: Date.now(), holdMs }));
     window.dispatchEvent(new Event(CHANGE_EVENT));
   } catch {
     // Storage can be unavailable (private mode); the return link is a convenience
