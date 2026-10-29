@@ -1071,7 +1071,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
   @SubscribeMessage('invite:send')
   async handleInviteSend(
-    @MessageBody() data: { toId: string; playerKey: string; difficulty?: Difficulty },
+    @MessageBody() data: { toId: string; playerKey: string; difficulty?: Difficulty; mode?: RoomMode },
     @ConnectedSocket() client: Socket,
   ) {
     if (!this.inviteLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
@@ -1098,6 +1098,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       target.socketId,
       typeof data.playerKey === 'string' && data.playerKey ? data.playerKey : undefined,
       isDifficulty(data.difficulty) ? data.difficulty : 'medium',
+      data.mode === 'alternate' ? 'alternate' : 'classic',
       expired => {
         this.server.to(expired.fromId).emit('invite:expired', { inviteId: expired.id });
         this.server.to(expired.toId).emit('invite:expired', { inviteId: expired.id });
@@ -1106,6 +1107,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     this.server.to(target.socketId).emit('invite:received', {
       inviteId: invite.id,
       from: { id: client.id, name: this.presenceNameOf(client.id, user) },
+      mode: invite.mode,
       expiresAt: invite.expiresAt,
     });
     return { success: true, inviteId: invite.id, expiresAt: invite.expiresAt };
@@ -1147,6 +1149,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       inviterUser?.id ?? null,
       invite.fromPlayerKey ?? this.presence.available.get(invite.fromId)?.playerKey,
       invite.difficulty,
+      invite.mode,
     );
     const playerKey =
       typeof data.playerKey === 'string' && data.playerKey
@@ -1159,6 +1162,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
     const roomInfo = {
       id: room.id,
+      mode: room.mode,
+      alt: null,
       players: this.publicPlayers(room),
       difficulty: room.difficulty,
       showOpponentMoves: room.showOpponentMoves,

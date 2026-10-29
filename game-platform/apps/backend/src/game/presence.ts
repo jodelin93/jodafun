@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Difficulty } from './room-store';
+import type { Difficulty, RoomMode } from './room-store';
 
 export const INVITE_TTL_MS = 30_000;
 const NAME_MAX_LENGTH = 20;
@@ -20,6 +20,7 @@ export interface Invite {
   toId: string; // target socket id
   fromPlayerKey?: string;
   difficulty: Difficulty;
+  mode: RoomMode; // the kind of game the inviter asked for
   expiresAt: number;
   timer: NodeJS.Timeout;
 }
@@ -64,6 +65,7 @@ export class PresenceState {
     toId: string,
     fromPlayerKey: string | undefined,
     difficulty: Difficulty,
+    mode: RoomMode,
     onExpire: (invite: Invite) => void,
   ): Invite {
     const id = randomUUID();
@@ -73,6 +75,7 @@ export class PresenceState {
       toId,
       fromPlayerKey,
       difficulty,
+      mode,
       expiresAt: Date.now() + INVITE_TTL_MS,
       timer: setTimeout(() => {
         if (this.invites.get(id) !== invite) return;

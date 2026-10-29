@@ -5,12 +5,15 @@ import type { Socket } from 'socket.io-client';
 import { ArrowLeft, Clock, Users, X } from 'lucide-react';
 import { useT } from '../i18n/I18nProvider';
 import { gameMessages } from '../i18n/messages/game';
+import { alternateMessages } from '../i18n/messages/alternate';
 
 export type OnlinePlayer = { id: string; name: string; isGuest: boolean; since: number };
 
 // The room the server creates when a request is accepted (same shape as a rejoin answer's room)
 export type InviteRoom = {
   id: string;
+  mode?: 'classic' | 'alternate';
+  alt?: null;
   players: { id: string; name: string; isHost: boolean; isReady: boolean; socketId: string; score: number }[];
   difficulty: 'easy' | 'medium' | 'hard';
   showOpponentMoves: boolean;
@@ -34,7 +37,10 @@ type Props = {
 // Lists players who have Joda Memory open and aren't in a room, and sends them game requests
 export default function OnlinePlayers({ socket, name, onNameChange, playerKey, difficulty, onBack, onRoomReady }: Props) {
   const t = useT(gameMessages);
+  const ta = useT(alternateMessages);
   const [players, setPlayers] = useState<OnlinePlayer[] | null>(null);
+  // The kind of game a request asks for: turns on one board, or "Play alternate"
+  const [mode, setMode] = useState<'classic' | 'alternate'>('classic');
   const [outgoing, setOutgoing] = useState<Outgoing | null>(null);
   // The server's error text and who the request was for; translated when shown
   const [sendError, setSendError] = useState<{ name: string; error?: string } | null>(null);
@@ -88,7 +94,7 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
     setSendError(null);
     socket.emit(
       'invite:send',
-      { toId: player.id, playerKey, difficulty },
+      { toId: player.id, playerKey, difficulty, mode },
       (res: { success: boolean; inviteId?: string; expiresAt?: number; error?: string }) => {
         if (!res?.success || !res.inviteId) {
           setSendError({ name: player.name, error: res?.error });
@@ -151,6 +157,34 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
           placeholder={t('chooseNamePlaceholder')}
           className="field"
         />
+      </div>
+
+      <div className="panel p-5">
+        <p id="online-mode-label" className="field-label">{ta('gameTypeLabel')}</p>
+        <div
+          role="group"
+          aria-labelledby="online-mode-label"
+          className="grid grid-cols-2 gap-1 rounded-2xl bg-felt-deep p-1 ring-1 ring-inset ring-table-rim"
+        >
+          {([
+            ['classic', t('playFriend')],
+            ['alternate', ta('playAlternate')],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
+              disabled={outgoing?.status === 'waiting'}
+              className={`min-h-11 rounded-xl px-2 py-2 font-semibold transition ${
+                mode === value ? 'bg-card text-ink shadow-rest' : 'text-chalk hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-3 text-sm text-chalk">{mode === 'alternate' ? ta('playAlternateDesc') : t('playFriendDesc')}</p>
       </div>
 
       {outgoing && (

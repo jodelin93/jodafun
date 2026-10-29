@@ -222,7 +222,7 @@ export default function JodaMemory() {
   const [showOnline, setShowOnline] = useState(false);
   // How many other players are listed as online right now
   const [othersOnline, setOthersOnline] = useState(0);
-  const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; expiresAt: number } | null>(null);
+  const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; mode: 'classic' | 'alternate'; expiresAt: number } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [inviteNow, setInviteNow] = useState(() => Date.now());
@@ -659,10 +659,15 @@ export default function JodaMemory() {
     const refreshOthers = () =>
       socket.emit('presence:list', {}, (res: { players?: unknown[] }) => setOthersOnline(res?.players?.length ?? 0));
     socket.on('presence:changed', refreshOthers);
-    socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; expiresAt: number }) => {
+    socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; mode?: 'classic' | 'alternate'; expiresAt: number }) => {
       setInviteError(null);
       setInviteNow(Date.now());
-      setIncomingInvite({ inviteId: data.inviteId, fromName: data.from?.name || '', expiresAt: data.expiresAt });
+      setIncomingInvite({
+        inviteId: data.inviteId,
+        fromName: data.from?.name || '',
+        mode: data.mode === 'alternate' ? 'alternate' : 'classic',
+        expiresAt: data.expiresAt,
+      });
     });
     const dropInvite = (data: { inviteId: string }) =>
       setIncomingInvite(current => (current && current.inviteId === data.inviteId ? null : current));
@@ -1676,7 +1681,9 @@ export default function JodaMemory() {
                 {t('wantsToPlay', { name: incomingInvite.fromName || t('aPlayer') })}
               </h2>
               <p className="mt-2 text-chalk">
-                {t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
+                {incomingInvite.mode === 'alternate'
+                  ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
+                  : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
                 {gameStarted && gameMode === 'single' ? `${t('acceptingEndsSolo')} ` : ''}
                 {t('inviteExpiresIn', { seconds: Math.max(0, Math.ceil((incomingInvite.expiresAt - inviteNow) / 1000)) })}
               </p>
