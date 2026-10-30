@@ -7,8 +7,43 @@ import { DIFFICULTIES, Difficulty } from '../scores/scores.dto';
 const GAME_TYPE = 'joda-memory';
 const CASINO = 'african-casino';
 const DOMINOES = 'dominoes';
+const DRAUGHTS = 'international-draughts';
 // Games recorded in game_participants (one row per seat, with teams)
 export type TeamGameType = typeof CASINO | typeof DOMINOES;
+export type GameResult = 'win' | 'loss' | 'draw';
+
+type ColorRecord = { gamesPlayed: number; wins: number; draws: number; losses: number };
+
+/**
+ * Draughts profile figures from the user's results, newest first. A draw is a game played but not
+ * won: winRate = wins / gamesPlayed × 100, rounded to 0.1. Streaks count consecutive wins, newest
+ * first, and a draw ends a winning streak just like a loss.
+ */
+export function draughtsStats(results: readonly { result: GameResult; color: 'white' | 'black' }[]) {
+  const record = (rows: typeof results): ColorRecord => ({
+    gamesPlayed: rows.length,
+    wins: rows.filter(r => r.result === 'win').length,
+    draws: rows.filter(r => r.result === 'draw').length,
+    losses: rows.filter(r => r.result === 'loss').length,
+  });
+  const all = record(results);
+  let currentStreak = 0;
+  while (currentStreak < results.length && results[currentStreak].result === 'win') currentStreak++;
+  let bestStreak = 0;
+  let run = 0;
+  for (const r of results) {
+    run = r.result === 'win' ? run + 1 : 0;
+    bestStreak = Math.max(bestStreak, run);
+  }
+  return {
+    ...all,
+    winRate: all.gamesPlayed ? Math.round((all.wins / all.gamesPlayed) * 1000) / 10 : 0,
+    currentStreak,
+    bestStreak,
+    asWhite: record(results.filter(r => r.color === 'white')),
+    asBlack: record(results.filter(r => r.color === 'black')),
+  };
+}
 
 type SoloBest = { bestTimeSeconds: number; bestMoves: number; runs: number } | null;
 
@@ -107,16 +142,30 @@ export class UsersService {
       solo,
       casino: await this.getTeamGameStats(userId, CASINO),
       dominoes: await this.getTeamGameStats(userId, DOMINOES),
+      draughts: await this.getDraughtsStats(userId),
     };
   }
 
-  // Joda Casino and Dominoes results: points are match points, never Memory pairs or times
+  // Joda Casino and Dominoes results: points are match points, never Memory pairs or times. Losses
+  // and draws are counted from their own result rows (neither game records draws today, so draws is
+  // always 0 for them).
   async getTeamGameStats(userId: string, gameType: TeamGameType) {
     const [row] = await this.prisma.$queryRaw<
-      { gamesPlayed: number; wins: number; twoPlayer: number; fourPlayer: number; pointsFor: number; pointsAgainst: number }[]
+      {
+        gamesPlayed: number;
+        wins: number;
+        draws: number;
+        losses: number;
+        twoPlayer: number;
+        fourPlayer: number;
+        pointsFor: number;
+        pointsAgainst: number;
+      }[]
     >`
       SELECT COUNT(*)::int AS "gamesPlayed",
              COUNT(*) FILTER (WHERE p.result = 'win')::int AS wins,
+             COUNT(*) FILTER (WHERE p.result = 'draw')::int AS draws,
+             COUNT(*) FILTER (WHERE p.result = 'loss')::int AS losses,
              COUNT(*) FILTER (WHERE (g.settings->>'players')::int = 2)::int AS "twoPlayer",
              COUNT(*) FILTER (WHERE (g.settings->>'players')::int = 4)::int AS "fourPlayer",
              COALESCE(SUM(p.points), 0)::int AS "pointsFor",
@@ -126,8 +175,74 @@ export class UsersService {
       WHERE p.user_id = ${userId} AND g.game_type = ${gameType}`;
     return {
       ...row,
-      losses: row.gamesPlayed - row.wins,
       winRate: row.gamesPlayed ? Math.round((row.wins / row.gamesPlayed) * 1000) / 10 : 0,
+    };
+  }
+
+  // Draughts results, newest first; see draughtsStats for how draws count
+  async getDraughtsStats(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ result: GameResult; team: number }[]>`
+      SELECT p.result, p.team
+      FROM game_participants p
+      JOIN games g ON g.id = p.game_id
+      WHERE p.user_id = ${userId} AND g.game_type = ${DRAUGHTS}
+      ORDER BY g.completed_at DESC, p.id DESC`;
+    return draughtsStats(rows.map(r => ({ result: r.result, color: r.team === 0 ? 'white' : 'black' })));
+  }
+
+  // One row per draughts game the user played: their colour, the opponent by name, how it ended
+  async getDraughtsHistory(userId: string, cursor: string | undefined, limit: number) {
+    let after = Prisma.empty;
+    if (cursor) {
+      const row = await this.prisma.gameParticipant.findFirst({
+        where: { id: cursor, userId },
+        select: { id: true },
+      });
+      if (!row) throw new BadRequestException('Invalid cursor');
+      after = Prisma.sql`AND (g.completed_at, p.id) <
+        (SELECT cg.completed_at, c.id FROM game_participants c JOIN games cg ON cg.id = c.game_id WHERE c.id = ${row.id})`;
+    }
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        gameId: string;
+        finishedAt: Date;
+        result: GameResult;
+        team: number;
+        seat: number;
+        settings: { reason?: string; moves?: number; rulesVersion?: string; forfeit?: boolean } | null;
+      }[]
+    >`
+      SELECT p.id, p.game_id AS "gameId", g.completed_at AS "finishedAt", p.result, p.team, p.seat, g.settings
+      FROM game_participants p
+      JOIN games g ON g.id = p.game_id
+      WHERE p.user_id = ${userId} AND g.game_type = ${DRAUGHTS} ${after}
+      ORDER BY g.completed_at DESC, p.id DESC
+      LIMIT ${limit + 1}`;
+    const page = rows.slice(0, limit);
+    const others = page.length
+      ? await this.prisma.gameParticipant.findMany({
+          where: { gameId: { in: page.map(r => r.gameId) } },
+          select: { gameId: true, seat: true, name: true },
+        })
+      : [];
+    return {
+      items: page.map(r => {
+        const opponent = others.find(o => o.gameId === r.gameId && o.seat !== r.seat);
+        return {
+          id: r.id,
+          result: r.result,
+          color: r.team === 0 ? ('white' as const) : ('black' as const),
+          // A name only: the opponent's account id stays private
+          opponent: opponent ? { name: opponent.name } : null,
+          reason: r.settings?.reason ?? null,
+          moves: r.settings?.moves ?? 0,
+          rulesVersion: r.settings?.rulesVersion ?? null,
+          finishedAt: r.finishedAt,
+          forfeit: r.settings?.forfeit === true,
+        };
+      }),
+      nextCursor: rows.length > limit ? page[page.length - 1].id : null,
     };
   }
 
@@ -148,7 +263,7 @@ export class UsersService {
         id: string;
         gameId: string;
         playedAt: Date;
-        result: 'win' | 'loss';
+        result: GameResult;
         team: number;
         seat: number;
         settings: {

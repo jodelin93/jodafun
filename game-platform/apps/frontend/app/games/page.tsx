@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useT } from '../i18n/I18nProvider';
 import { homeMessages } from '../i18n/messages/home';
 import { GAMES, gamePath } from '../lib/games';
+import { useGameTitle } from '../lib/useGameTitle';
 import { useGuestPlay } from '../lib/useGuestPlay';
 import SiteHeader from '../components/ui/SiteHeader';
 import SiteFooter from '../components/ui/SiteFooter';
@@ -13,6 +14,7 @@ import Loading from '../components/ui/Loading';
 
 export default function GamesPage() {
   const t = useT(homeMessages);
+  const { title, subtitle } = useGameTitle();
   const { isPending } = useAuth();
   const { play, loading, error } = useGuestPlay();
   const [searchQuery, setSearchQuery] = useState('');
@@ -20,7 +22,8 @@ export default function GamesPage() {
   const query = searchQuery.toLowerCase();
   const filteredGames = GAMES.filter(
     (game) =>
-      game.title.toLowerCase().includes(query) ||
+      title(game.id).toLowerCase().includes(query) ||
+      (subtitle(game.id) ?? '').toLowerCase().includes(query) ||
       t(game.description).toLowerCase().includes(query) ||
       game.tags.some((tag) => t(tag).toLowerCase().includes(query))
   );
@@ -65,7 +68,8 @@ export default function GamesPage() {
                   {game.available ? (
                     <article className="flex h-full flex-col rounded-card bg-card p-5 text-ink shadow-rest ring-1 ring-black/5">
                       <game.Icon className="h-8 w-8" aria-hidden="true" />
-                      <h2 className="title-md mt-3">{game.title}</h2>
+                      <h2 className="title-md mt-3">{title(game.id)}</h2>
+                      {subtitle(game.id) && <p className="text-sm font-semibold text-ink-soft">{subtitle(game.id)}</p>}
                       <p className="mt-1 text-ink-soft">{t(game.description)}</p>
                       <p className="mt-4 flex items-center gap-2 text-sm text-ink-soft">
                         <Users className="h-4 w-4" aria-hidden="true" />
@@ -89,7 +93,7 @@ export default function GamesPage() {
                       <div className="rounded-lg bg-card p-3 text-ink">
                         <game.Icon className="h-6 w-6" aria-hidden="true" />
                       </div>
-                      <h2 className="title-md mt-3 text-white">{game.title}</h2>
+                      <h2 className="title-md mt-3 text-white">{title(game.id)}</h2>
                       <span className="chip mt-2 bg-felt-deep">{t('comingSoon')}</span>
                     </article>
                   )}

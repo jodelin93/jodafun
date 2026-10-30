@@ -12,6 +12,7 @@ export interface CasinoStats {
   wins: number;
   losses: number;
   winRate: number;
+  draws?: number; // always 0 for Casino and Dominoes; not shown
   twoPlayer: number;
   fourPlayer: number;
   pointsFor: number;
@@ -32,7 +33,31 @@ export interface UserStats {
   casino?: CasinoStats;
   // Dominoes results, same shape as Casino: twoPlayer is head-to-head, fourPlayer is partners
   dominoes?: CasinoStats;
+  draughts?: DraughtsStats;
 }
+
+// International draughts: games can be drawn; asWhite / asBlack split the results by colour played
+export interface DraughtsColorStats {
+  gamesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+}
+
+export interface DraughtsStats {
+  gamesPlayed: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  winRate: number;
+  currentStreak: number;
+  bestStreak: number;
+  asWhite: DraughtsColorStats;
+  asBlack: DraughtsColorStats;
+}
+
+// Draws exist only in draughts so far; the other games only ever send 'win' or 'loss'
+export type GameResult = 'win' | 'loss' | 'draw';
 
 export interface PublicProfile {
   id: string;
@@ -45,7 +70,7 @@ export interface PublicProfile {
 export interface HistoryItem {
   id: string;
   playedAt: string;
-  result: 'win' | 'loss';
+  result: GameResult;
   opponentName: string | null;
   roundsWon: number;
   roundsLost: number;
@@ -66,7 +91,7 @@ export interface CasinoPlayer {
 export interface CasinoHistoryItem {
   id: string;
   playedAt: string;
-  result: 'win' | 'loss';
+  result: GameResult;
   players: 2 | 4;
   targetPoints: number | null;
   hands: number | null;
@@ -80,6 +105,25 @@ export interface CasinoHistoryItem {
 
 export interface CasinoHistoryPage {
   items: CasinoHistoryItem[];
+  nextCursor: string | null;
+}
+
+// One finished draughts game, from this player's side. reason is an EndReason ('no-pieces',
+// 'resignation', 'agreement', ...); moves counts single moves (plies)
+export interface DraughtsHistoryItem {
+  id: string;
+  result: GameResult;
+  color: 'white' | 'black';
+  opponent: { name: string } | null;
+  reason: string | null;
+  moves: number;
+  rulesVersion: string | null;
+  finishedAt: string;
+  forfeit: boolean;
+}
+
+export interface DraughtsHistoryPage {
+  items: DraughtsHistoryItem[];
   nextCursor: string | null;
 }
 
@@ -127,6 +171,12 @@ export function fetchMyDominoesHistory(cursor: string | null, signal?: AbortSign
   const q = new URLSearchParams({ game: 'dominoes', limit: '20' });
   if (cursor) q.set('cursor', cursor);
   return getJson<CasinoHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
+}
+
+export function fetchMyDraughtsHistory(cursor: string | null, signal?: AbortSignal) {
+  const q = new URLSearchParams({ game: 'international-draughts', limit: '20' });
+  if (cursor) q.set('cursor', cursor);
+  return getJson<DraughtsHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
 }
 
 export const fetchProfile = (id: string, signal?: AbortSignal) =>

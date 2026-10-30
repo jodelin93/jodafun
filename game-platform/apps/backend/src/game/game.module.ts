@@ -8,6 +8,9 @@ import { CasinoResults } from '../casino/casino-results';
 import { DominoesGateway } from '../dominoes/dominoes.gateway';
 import { DominoesService } from '../dominoes/dominoes.service';
 import { DominoResults } from '../dominoes/dominoes-results';
+import { DraughtsGateway } from '../draughts/draughts.gateway';
+import { DraughtsService } from '../draughts/draughts.service';
+import { DraughtsResults } from '../draughts/draughts-results';
 
 @Module({
   providers: [
@@ -20,6 +23,9 @@ import { DominoResults } from '../dominoes/dominoes-results';
     DominoesService,
     DominoResults,
     DominoesGateway,
+    DraughtsService,
+    DraughtsResults,
+    DraughtsGateway,
   ],
 })
 export class GameModule {}

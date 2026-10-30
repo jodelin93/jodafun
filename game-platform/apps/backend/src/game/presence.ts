@@ -4,7 +4,7 @@ import type { Difficulty, RoomMode } from './room-store';
 export const INVITE_TTL_MS = 30_000;
 const NAME_MAX_LENGTH = 20;
 
-export type InviteGame = 'joda-memory' | 'african-casino' | 'dominoes';
+export type InviteGame = 'joda-memory' | 'african-casino' | 'dominoes' | 'international-draughts';
 // Games played at a room of seats, whose requests invite into the inviter's room
 export type TeamGameId = Exclude<InviteGame, 'joda-memory'>;
 
@@ -26,7 +26,7 @@ export interface Invite {
   game: InviteGame; // which game the request is for
   difficulty: Difficulty;
   mode: RoomMode; // Joda Memory: the kind of game the inviter asked for
-  roomId: string | null; // Casino, Dominoes: the inviter's room the target is asked to join
+  roomId: string | null; // Casino, Dominoes, draughts: the inviter's room the target is asked to join
   expiresAt: number;
   timer: NodeJS.Timeout;
 }

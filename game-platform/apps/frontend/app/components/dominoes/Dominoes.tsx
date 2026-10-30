@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../../lib/currentRoom';
 import { isPlayableGameId, type PlayableGameId } from '../../lib/games';
+import { useGameTitle } from '../../lib/useGameTitle';
 import { getPlayerKey } from '../../lib/playerKey';
 import { useDominoesRoom } from '../../lib/dominoes/useDominoesRoom';
 import { countdown } from '../../lib/dominoes/describe';
@@ -34,6 +35,7 @@ const PLAYING_HOLD_MS = 3 * 60 * 1000;
 // Dominoes: menu, joining by code or link, lobby, table, results, rules and tutorial
 export default function Dominoes() {
   const t = useT(dominoesMessages);
+  const { title: gameTitle } = useGameTitle();
   const tx = t as unknown as (key: string, vars?: Record<string, string | number>) => string;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -169,8 +171,8 @@ export default function Dominoes() {
       if (res.game === 'dominoes' && res.roomId) {
         setUrlRoom(res.roomId);
         void dominoes.rejoin(res.roomId);
-      } else if (res.game === 'african-casino' && res.roomId) {
-        router.push(roomPath(res.roomId, 'african-casino'));
+      } else if ((res.game === 'african-casino' || res.game === 'international-draughts') && res.roomId) {
+        router.push(roomPath(res.roomId, res.game));
       } else if (res.room) {
         router.push(roomPath(res.room.id, 'joda-memory'));
       }
@@ -422,7 +424,9 @@ export default function Dominoes() {
       ? t(i.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: i.fromName })
       : i.game === 'african-casino'
         ? t('inviteCasino', { name: i.fromName, n: i.capacity ?? 2 })
-        : t('inviteMemory', { name: i.fromName });
+        : i.game === 'international-draughts'
+          ? t('inviteDraughts', { name: i.fromName, game: gameTitle('international-draughts') })
+          : t('inviteMemory', { name: i.fromName });
 
   return (
     <div className="flex min-h-screen flex-col">

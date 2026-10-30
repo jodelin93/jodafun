@@ -8,6 +8,7 @@ import { useLocale, useT } from './i18n/I18nProvider';
 import { homeMessages } from './i18n/messages/home';
 import { useGuestPlay } from './lib/useGuestPlay';
 import { GAMES, gamePath, type Game } from './lib/games';
+import { useGameTitle } from './lib/useGameTitle';
 import SiteHeader from './components/ui/SiteHeader';
 import SiteFooter from './components/ui/SiteFooter';
 import PlayingCard from './components/ui/PlayingCard';
@@ -54,6 +55,7 @@ export default function Home() {
 
 function Hero({ onPlay, loading, error }: { onPlay: () => void; loading: boolean; error: string | null }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   return (
     <section className="page grid items-center gap-10 pb-8 pt-10 sm:pt-16 lg:grid-cols-[1.05fr_1fr] lg:gap-6 lg:pb-16">
       <div className="max-w-xl">
@@ -64,7 +66,7 @@ function Hero({ onPlay, loading, error }: { onPlay: () => void; loading: boolean
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <button onClick={onPlay} disabled={loading} className="btn-gold px-6 py-3.5 text-lg">
             <Play className="h-5 w-5 fill-current" aria-hidden="true" />
-            {loading ? t('starting') : t('playGame', { title: featured.title })}
+            {loading ? t('starting') : t('playGame', { title: title(featured.id) })}
           </button>
           <Link href="/signup" className="btn-quiet px-6 py-3.5 text-lg">
             {t('createAccount')}
@@ -84,6 +86,7 @@ function Hero({ onPlay, loading, error }: { onPlay: () => void; loading: boolean
 
 function FanHand({ onPlay }: { onPlay: () => void }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   return (
     <div className="relative mx-auto h-[240px] w-full max-w-[460px] sm:h-[330px]">
       {HAND.map((game, i) => {
@@ -106,7 +109,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
               {isFeatured ? (
                 <button
                   onClick={onPlay}
-                  aria-label={t('playGame', { title: game.title })}
+                  aria-label={t('playGame', { title: title(game.id) })}
                   className="h-full w-full rounded-card text-left shadow-lift"
                 >
                   <PlayingCard className="h-full w-full">
@@ -119,7 +122,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
                 </PlayingCard>
               )}
             </div>
-            {!isFeatured && <span className="sr-only">{t('comingSoonSr', { title: game.title })}</span>}
+            {!isFeatured && <span className="sr-only">{t('comingSoonSr', { title: title(game.id) })}</span>}
           </div>
         );
       })}
@@ -129,6 +132,7 @@ function FanHand({ onPlay }: { onPlay: () => void }) {
 
 function CardFace({ game, cta }: { game: Game; cta?: boolean }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   const Icon = game.Icon;
   // Corner icons mirror the index marks on a real playing card
   return (
@@ -137,7 +141,7 @@ function CardFace({ game, cta }: { game: Game; cta?: boolean }) {
       <div className="flex flex-1 items-center justify-center">
         <Icon className="h-10 w-10 text-signal sm:h-14 sm:w-14" strokeWidth={1.75} aria-hidden="true" />
       </div>
-      <p className="font-display text-sm font-extrabold leading-tight sm:text-lg">{game.title}</p>
+      <p className="font-display text-sm font-extrabold leading-tight sm:text-lg">{title(game.id)}</p>
       <p className="mt-0.5 text-xs text-ink-soft">{cta ? t('tapToPlay') : t('comingSoon')}</p>
       <Icon className="absolute bottom-3 right-3 h-4 w-4 rotate-180 text-signal sm:bottom-4 sm:right-4 sm:h-5 sm:w-5" aria-hidden="true" />
     </div>
@@ -146,6 +150,7 @@ function CardFace({ game, cta }: { game: Game; cta?: boolean }) {
 
 function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   const { intlLocale } = useLocale();
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
@@ -186,7 +191,7 @@ function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }
           </PlayingCard>
         </div>
         <div>
-          <h2 className="title-lg">{featured.title}</h2>
+          <h2 className="title-lg">{title(featured.id)}</h2>
           <p className="mt-2 max-w-prose text-chalk">{t(featured.description)}</p>
           <ul className="mt-4 flex flex-wrap gap-2">
             <li className="chip"><Users className="h-4 w-4" aria-hidden="true" />{featured.playersLabel ? t(featured.playersLabel) : t('playersRange', { range: featured.players })}</li>
@@ -195,7 +200,7 @@ function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button onClick={onPlay} disabled={loading} className="btn-gold px-6">
               <Play className="h-5 w-5 fill-current" aria-hidden="true" />
-              {loading ? t('starting') : t('playGame', { title: featured.title })}
+              {loading ? t('starting') : t('playGame', { title: title(featured.id) })}
             </button>
             <button onClick={copyLink} className="btn-quiet">
               {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Link2 className="h-4 w-4" aria-hidden="true" />}
@@ -230,6 +235,7 @@ function AccountRow({ label, value }: { label: string; value: string }) {
 
 function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   return (
     <section className="page mt-16" aria-labelledby="games-heading">
       <div className="flex items-end justify-between gap-4">
@@ -246,12 +252,12 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
               <button
                 onClick={() => onPlay(game)}
                 className="group block aspect-[3/4] w-full rounded-card text-left"
-                aria-label={t('playGame', { title: game.title })}
+                aria-label={t('playGame', { title: title(game.id) })}
               >
                 <PlayingCard className="h-full w-full transition-transform duration-200 group-hover:-translate-y-1">
                   <div className="flex h-full flex-col p-4">
                     <game.Icon className="h-9 w-9 text-signal" strokeWidth={1.75} aria-hidden="true" />
-                    <p className="mt-auto font-display text-lg font-extrabold leading-tight">{game.title}</p>
+                    <p className="mt-auto font-display text-lg font-extrabold leading-tight">{title(game.id)}</p>
                     <p className="mt-1 text-xs text-ink-soft">
                       {game.playersLabel ? t(game.playersLabel) : t('playersRange', { range: game.players })}
                     </p>
@@ -267,7 +273,7 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
                   back={
                     <div className="flex h-full flex-col justify-end p-3">
                       <div className="rounded-lg bg-felt-deep/90 px-3 py-2">
-                        <p className="font-display font-bold leading-tight text-white">{game.title}</p>
+                        <p className="font-display font-bold leading-tight text-white">{title(game.id)}</p>
                         <p className="text-xs text-chalk">{t('comingSoon')}</p>
                       </div>
                     </div>
@@ -284,8 +290,9 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
 
 function PlayWithFriend({ onPlay, loading }: { onPlay: () => void; loading: boolean }) {
   const t = useT(homeMessages);
+  const { title } = useGameTitle();
   const steps = [
-    { title: t('step1Title'), body: t('step1Body', { title: featured.title }) },
+    { title: t('step1Title'), body: t('step1Body', { title: title(featured.id) }) },
     { title: t('step2Title'), body: t('step2Body') },
     { title: t('step3Title'), body: t('step3Body') },
   ];

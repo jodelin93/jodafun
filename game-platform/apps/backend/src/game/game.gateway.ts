@@ -17,6 +17,8 @@ import { CasinoService } from '../casino/casino.service';
 import { CASINO_GAME_TYPE } from '../casino/casino.types';
 import { DominoesService } from '../dominoes/dominoes.service';
 import { DOMINOES_GAME_TYPE } from '../dominoes/dominoes.types';
+import { DraughtsService } from '../draughts/draughts.service';
+import { DRAUGHTS_GAME_TYPE } from '../draughts/draughts.types';
 import type { TeamRoomGame } from './team-room';
 import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
 import { PresenceState, presenceName, type PresenceEntry, type TeamGameId } from './presence';
@@ -73,7 +75,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   private presenceTimer: NodeJS.Timeout | null = null;
   private lastPresenceEmitAt = 0;
   private lastPresenceSignature = '';
-  // Games played at a room of seats (Casino, Dominoes), by game id: invitations fill their free seats
+  // Games played at a room of seats (Casino, Dominoes, draughts), by game id: invitations fill their free seats
   private teamGames: Map<TeamGameId, TeamRoomGame>;
 
   constructor(
@@ -82,10 +84,12 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     private sessions: SocketSessions,
     casino: CasinoService,
     dominoes: DominoesService,
+    draughts: DraughtsService,
   ) {
     this.teamGames = new Map<TeamGameId, TeamRoomGame>([
       [CASINO_GAME_TYPE, casino],
       [DOMINOES_GAME_TYPE, dominoes],
+      [DRAUGHTS_GAME_TYPE, draughts],
     ]);
     // Taking a seat in one of these rooms leaves the online list like any other seat; leaving one
     // withdraws the requests sent for that game's room
@@ -112,7 +116,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   async onModuleInit() {
     let restored: GameRoom[];
     try {
-      // Casino and Dominoes rooms are restored by their own services
+      // Casino, Dominoes and draughts rooms are restored by their own services
       restored = (await this.rooms.loadAll()).filter(isMemoryRoom);
     } catch (error) {
       console.error('Failed to restore rooms from Redis:', error);

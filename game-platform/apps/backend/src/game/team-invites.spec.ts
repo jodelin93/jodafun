@@ -2,6 +2,7 @@ import type { Socket } from 'socket.io';
 import type { SessionUser } from '../auth/session';
 import { CasinoService } from '../casino/casino.service';
 import { DominoesService } from '../dominoes/dominoes.service';
+import { DraughtsService } from '../draughts/draughts.service';
 import { GameGateway } from './game.gateway';
 import { RoomStore } from './room-store';
 
@@ -29,7 +30,8 @@ function setup() {
   const sessions = { user: async (id: string) => users.get(id) ?? null, forget: () => undefined };
   const casino = new CasinoService(store, { save: async () => true } as never);
   const dominoes = new DominoesService(store, { save: async () => true } as never);
-  const gateway = new GameGateway({} as never, store, sessions as never, casino, dominoes);
+  const draughts = new DraughtsService(store, { save: async () => true } as never);
+  const gateway = new GameGateway({} as never, store, sessions as never, casino, dominoes, draughts);
   const connected = new Set<string>();
   const server = fakeServer(connected);
   gateway.server = server as never;
@@ -46,8 +48,9 @@ function setup() {
     sockets.forEach(client => gateway.handleDisconnect(client));
     dominoes.onModuleDestroy();
     casino.onModuleDestroy();
+    draughts.onModuleDestroy();
   };
-  return { store, casino, dominoes, gateway, server, socket, close };
+  return { store, casino, dominoes, draughts, gateway, server, socket, close };
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -134,8 +137,41 @@ describe('Invitations into Dominoes rooms', () => {
     close();
   });
 
-  it('sends a Joda Memory join or rejoin with a Dominoes or Casino code to the right game', async () => {
-    const { dominoes, casino, gateway, socket, close } = setup();
+  it('fills the free seat of a draughts room through the draughts join', async () => {
+    const { draughts, gateway, server, socket, store, close } = setup();
+    const host = socket('d0', 0);
+    const created = await draughts.create('d0', user(0), { name: 'Ana', playerKey: 'browser-key-d0' });
+    if (!created.ok) throw new Error();
+    const targets = [1, 2].map(n => socket(`t${n}`, n));
+    for (const t of targets) await gateway.handlePresenceUpdate({ available: true, name: `T${t.id}`, playerKey: `browser-key-${t.id}` }, t);
+    const game = 'international-draughts';
+    const sent = await gateway.handleInviteSend({ toId: 't1', playerKey: 'browser-key-d0', game, roomId: created.roomId }, host);
+    expect(sent.success).toBe(true);
+    // One free seat: a second request is refused
+    expect(await gateway.handleInviteSend({ toId: 't2', playerKey: 'browser-key-d0', game, roomId: created.roomId }, host)).toEqual({
+      success: false,
+      error: 'You already have a pending request',
+    });
+    expect(server.sent.find(e => e.to === 't1' && e.event === 'invite:received')!.payload).toEqual(
+      expect.objectContaining({ from: { id: 'd0', name: 'Ana' }, game, capacity: 2 }),
+    );
+    const inviteId = (sent as { inviteId: string }).inviteId;
+    expect(await gateway.handleInviteRespond({ inviteId, accept: true, playerKey: 'browser-key-t1' }, targets[0])).toEqual({
+      success: true,
+      game,
+      roomId: created.roomId,
+    });
+    expect(store.getDraughts(created.roomId)!.players.map(p => [p.socketId, p.seat])).toEqual([
+      ['d0', 0],
+      ['t1', 1],
+    ]);
+    close();
+  });
+
+  it('sends a Joda Memory join or rejoin with a Dominoes, Casino or draughts code to the right game', async () => {
+    const { dominoes, casino, draughts, gateway, socket, close } = setup();
+    const draughtsRoom = await draughts.create('d0', user(6), { playerKey: 'browser-key-6' });
+    if (!draughtsRoom.ok) throw new Error();
     const created = await dominoes.create('s0', user(0), { playerKey: 'browser-key-0', mode: 'head-to-head' });
     const casinoRoom = await casino.create('c0', user(5), { playerKey: 'browser-key-5', players: 2 });
     if (!created.ok || !casinoRoom.ok) throw new Error();
@@ -154,6 +190,11 @@ describe('Invitations into Dominoes rooms', () => {
       success: false,
       error: 'Wrong game',
       gameType: 'african-casino',
+    });
+    expect(await gateway.handleRejoinRoom({ roomId: draughtsRoom.roomId, playerKey: 'k' }, visitor)).toEqual({
+      success: false,
+      error: 'Wrong game',
+      gameType: 'international-draughts',
     });
     close();
   });

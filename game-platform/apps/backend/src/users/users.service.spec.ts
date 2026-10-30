@@ -1,4 +1,4 @@
-import { UsersService } from './users.service';
+import { UsersService, draughtsStats } from './users.service';
 
 // Answers each raw query with the next queued result and records the values bound into it
 function fakePrisma(answers: unknown[][], others: unknown[] = []) {
@@ -62,15 +62,116 @@ describe('UsersService team-game history and stats', () => {
     expect(page.nextCursor).toBeNull();
   });
 
-  it('adds a dominoes block shaped like the casino block to the stats', async () => {
+  it('adds a dominoes block shaped like the casino block, losses and draws counted from their own rows', async () => {
     const totals = { gamesPlayed: 0, wins: 0, losses: 0, roundsWon: 0, roundsLost: 0, currentStreak: 0, bestStreak: 0 };
-    const casino = { gamesPlayed: 4, wins: 3, twoPlayer: 1, fourPlayer: 3, pointsFor: 30, pointsAgainst: 20 };
-    const dominoes = { gamesPlayed: 2, wins: 1, twoPlayer: 2, fourPlayer: 0, pointsFor: 210, pointsAgainst: 180 };
-    const prisma = fakePrisma([[totals], [], [casino], [dominoes]]);
+    // What the query returns for existing data: only win and loss rows, so draws are 0
+    const casino = { gamesPlayed: 4, wins: 3, draws: 0, losses: 1, twoPlayer: 1, fourPlayer: 3, pointsFor: 30, pointsAgainst: 20 };
+    const dominoes = { gamesPlayed: 2, wins: 1, draws: 0, losses: 1, twoPlayer: 2, fourPlayer: 0, pointsFor: 210, pointsAgainst: 180 };
+    const prisma = fakePrisma([[totals], [], [casino], [dominoes], []]);
     const stats = await new UsersService(prisma as never).getStats('u');
     expect(prisma.bound[2]).toContain('african-casino');
     expect(prisma.bound[3]).toContain('dominoes');
+    expect(prisma.bound[4]).toContain('international-draughts');
+    // The same numbers as before the draws column existed (losses = gamesPlayed - wins for them)
     expect(stats.casino).toEqual({ ...casino, losses: 1, winRate: 75 });
     expect(stats.dominoes).toEqual({ ...dominoes, losses: 1, winRate: 50 });
+    expect(stats.draughts).toEqual({
+      gamesPlayed: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      winRate: 0,
+      currentStreak: 0,
+      bestStreak: 0,
+      asWhite: { gamesPlayed: 0, wins: 0, draws: 0, losses: 0 },
+      asBlack: { gamesPlayed: 0, wins: 0, draws: 0, losses: 0 },
+    });
+  });
+});
+
+describe('UsersService draughts stats and history', () => {
+  it('counts draws as played but not won, and a draw ends a winning streak', async () => {
+    // Newest first: win, win, draw, win, win, win, loss
+    const rows = [
+      { result: 'win', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'draw', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'win', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'loss', team: 0 },
+    ];
+    const prisma = fakePrisma([rows]);
+    const stats = await new UsersService(prisma as never).getDraughtsStats('u');
+    expect(prisma.bound[0]).toEqual(['u', 'international-draughts']);
+    expect(stats).toEqual({
+      gamesPlayed: 7,
+      wins: 5,
+      draws: 1,
+      losses: 1,
+      winRate: 71.4,
+      currentStreak: 2,
+      bestStreak: 3,
+      asWhite: { gamesPlayed: 4, wins: 2, draws: 1, losses: 1 },
+      asBlack: { gamesPlayed: 3, wins: 3, draws: 0, losses: 0 },
+    });
+  });
+
+  it('has no current streak when the latest game was a draw', () => {
+    const stats = draughtsStats([
+      { result: 'draw', color: 'white' },
+      { result: 'win', color: 'black' },
+      { result: 'win', color: 'white' },
+    ]);
+    expect(stats).toEqual(expect.objectContaining({ gamesPlayed: 3, wins: 2, draws: 1, losses: 0, winRate: 66.7, currentStreak: 0, bestStreak: 2 }));
+    expect(draughtsStats([{ result: 'draw', color: 'white' }])).toEqual(expect.objectContaining({ winRate: 0, currentStreak: 0, bestStreak: 0 }));
+  });
+
+  it('returns history rows with the colour, the opponent by name and how the game ended', async () => {
+    const settings = { rulesVersion: 'FMJD-Annex1-2024-08-21', reason: 'agreement', winnerColor: null, moves: 41, notation: [], routes: [] };
+    const finishedAt = new Date('2026-10-02T00:00:00Z');
+    const rows = [
+      { id: 'part-a', gameId: 'ga', finishedAt, result: 'draw', team: 1, seat: 0, settings },
+      { id: 'part-b', gameId: 'gb', finishedAt, result: 'loss', team: 0, seat: 1, settings: { ...settings, reason: 'forfeit', winnerColor: 'black', forfeit: true, moves: 3 } },
+      { id: 'part-c', gameId: 'gc', finishedAt, result: 'win', team: 0, seat: 0, settings },
+    ];
+    const others = [
+      { gameId: 'ga', seat: 0, name: 'Me' },
+      { gameId: 'ga', seat: 1, name: 'Bo' },
+      { gameId: 'gb', seat: 0, name: 'Cy' },
+      { gameId: 'gb', seat: 1, name: 'Me' },
+    ];
+    const prisma = fakePrisma([rows], others);
+    const page = await new UsersService(prisma as never).getDraughtsHistory('u', undefined, 2);
+    expect(prisma.bound[0]).toContain('international-draughts');
+    expect(page.items).toEqual([
+      {
+        id: 'part-a',
+        result: 'draw',
+        color: 'black',
+        opponent: { name: 'Bo' },
+        reason: 'agreement',
+        moves: 41,
+        rulesVersion: 'FMJD-Annex1-2024-08-21',
+        finishedAt,
+        forfeit: false,
+      },
+      {
+        id: 'part-b',
+        result: 'loss',
+        color: 'white',
+        opponent: { name: 'Cy' },
+        reason: 'forfeit',
+        moves: 3,
+        rulesVersion: 'FMJD-Annex1-2024-08-21',
+        finishedAt,
+        forfeit: true,
+      },
+    ]);
+    expect(page.nextCursor).toBe('part-b');
+  });
+
+  it('rejects a cursor that is not one of the user’s rows', async () => {
+    await expect(new UsersService(fakePrisma([]) as never).getDraughtsHistory('u', 'nope', 20)).rejects.toThrow('Invalid cursor');
   });
 });

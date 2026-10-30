@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Mail, MessageCircle, MessageSquareText, Share2 } from 'lucide-react';
 import { useT } from '../i18n/I18nProvider';
 import { shareMessages } from '../i18n/messages/share';
-import { GAME_TITLES, type PlayableGameId } from '../lib/games';
+import type { PlayableGameId } from '../lib/games';
+import { useGameTitle } from '../lib/useGameTitle';
 
 type Props = { url: string; code: string; onCopy: () => void; game?: PlayableGameId };
 
@@ -13,7 +14,7 @@ export default function ShareRoomButton({ url, code, onCopy, game = 'joda-memory
   const t = useT(shareMessages);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const title = GAME_TITLES[game];
+  const title = useGameTitle().title(game);
   const text = t('inviteText', { code, game: title });
   const message = encodeURIComponent(`${text} ${url}`);
 

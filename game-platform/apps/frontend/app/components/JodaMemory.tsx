@@ -10,6 +10,7 @@ import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../lib/currentRoom';
 import { isPlayableGameId, type PlayableGameId } from '../lib/games';
+import { useGameTitle } from '../lib/useGameTitle';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
 import ShareRoomButton from './ShareRoomButton';
 import AlternateRoom, { AltOpponentLine, formatAltTime, type AltRoomState } from './AlternateRoom';
@@ -170,6 +171,7 @@ export default function JodaMemory() {
   const t = useT(gameMessages);
   const th = useT(howToPlayMessages);
   const ta = useT(alternateMessages);
+  const { title: gameTitle } = useGameTitle();
   const [gameMode, setGameMode] = useState<GameMode>(null);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [cards, setCards] = useState<Card[]>([]);
@@ -1219,8 +1221,8 @@ export default function JodaMemory() {
         setIncomingInvite(null);
         return;
       }
-      // A Joda Casino or Dominoes request: the seat is ours, that game's page sits us down with the same player key
-      if (res?.success && (res.game === 'african-casino' || res.game === 'dominoes') && res.roomId) {
+      // A Joda Casino, Dominoes or draughts request: the seat is ours, that game's page sits us down with the same player key
+      if (res?.success && (res.game === 'african-casino' || res.game === 'dominoes' || res.game === 'international-draughts') && res.roomId) {
         setIncomingInvite(null);
         router.push(roomPath(res.roomId, res.game));
         return;
@@ -1702,6 +1704,8 @@ export default function JodaMemory() {
                   ? t(incomingInvite.capacity === 4 ? 'inviteBodyCasinoTeams' : 'inviteBodyCasino', { name: incomingInvite.fromName || t('aPlayer') })
                   : incomingInvite.game === 'dominoes'
                     ? t(incomingInvite.capacity === 4 ? 'inviteBodyDominoesTeams' : 'inviteBodyDominoes', { name: incomingInvite.fromName || t('aPlayer') })
+                    : incomingInvite.game === 'international-draughts'
+                    ? t('inviteBodyDraughts', { name: incomingInvite.fromName || t('aPlayer'), game: gameTitle('international-draughts') })
                     : incomingInvite.mode === 'alternate'
                     ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
                     : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}

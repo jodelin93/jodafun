@@ -28,6 +28,9 @@ export class UsersController {
     if (query.game === 'african-casino' || query.game === 'dominoes') {
       return this.usersService.getTeamGameHistory(req.sessionUser.id, query.game, query.cursor, limit);
     }
+    if (query.game === 'international-draughts') {
+      return this.usersService.getDraughtsHistory(req.sessionUser.id, query.cursor, limit);
+    }
     return this.usersService.getHistory(req.sessionUser.id, query.cursor, limit);
   }
 

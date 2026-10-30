@@ -213,7 +213,7 @@ model GameParticipant {
   seat   Int
   team   Int
   name   String  @db.VarChar(100) // display name when the game was played
-  result String  @db.VarChar(10) // win | loss
+  result String  @db.VarChar(10) // win | loss | draw
   points Int     @default(0) // the team's match points
 
   // Relations

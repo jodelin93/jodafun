@@ -11,6 +11,7 @@ import Logo from './Logo';
 import LanguageSwitcher from '../../i18n/LanguageSwitcher';
 import { useT } from '../../i18n/I18nProvider';
 import { siteMessages } from '../../i18n/messages/site';
+import { useGameTitle } from '../../lib/useGameTitle';
 
 const NAV = [
   { href: '/games', label: 'navGames' },
@@ -19,6 +20,7 @@ const NAV = [
 
 export default function SiteHeader() {
   const t = useT(siteMessages);
+  const { title: gameTitle } = useGameTitle();
   const pathname = usePathname();
   const router = useRouter();
   const { user, isPending, refreshSession } = useAuth();
@@ -125,7 +127,7 @@ export default function SiteHeader() {
         <div className="border-t border-gold/30 bg-felt" role="status">
           <div className="page flex items-center justify-between gap-3 py-2">
             <p className="min-w-0 text-sm text-chalk">
-              {t('roomPre')}{' '}
+              <span className="font-semibold text-white">{gameTitle(openRoom.game ?? 'joda-memory')}</span> · {t('roomPre')}{' '}
               <span className="font-display font-bold tracking-[0.15em] text-white">{openRoom.roomId}</span> {t('roomPost')}
             </p>
             <div className="flex shrink-0 items-center gap-1">

@@ -11,6 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../../lib/currentRoom';
 import { isPlayableGameId, type PlayableGameId } from '../../lib/games';
+import { useGameTitle } from '../../lib/useGameTitle';
 import { getPlayerKey } from '../../lib/playerKey';
 import { useCasinoRoom } from '../../lib/casino/useCasinoRoom';
 import { teamOfSeat, type TurnAction, type TurnProposal } from '../../lib/casino/types';
@@ -32,6 +33,7 @@ const ROOM_HOLD_MS = 5 * 60 * 1000;
 // Joda Casino: menu, joining by code or link, lobby, table, results, rules and tutorial
 export default function AfricanCasino() {
   const t = useT(casinoMessages);
+  const { title: gameTitle } = useGameTitle();
   const tx = t as unknown as (key: string, vars?: Record<string, string | number>) => string;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -160,8 +162,8 @@ export default function AfricanCasino() {
       if (res.game === 'african-casino' && res.roomId) {
         setUrlRoom(res.roomId);
         void casino.rejoin(res.roomId);
-      } else if (res.game === 'dominoes' && res.roomId) {
-        router.push(roomPath(res.roomId, 'dominoes'));
+      } else if ((res.game === 'dominoes' || res.game === 'international-draughts') && res.roomId) {
+        router.push(roomPath(res.roomId, res.game));
       } else if (res.room) {
         router.push(`/games/joda-memory?roomId=${res.room.id}`);
       }
@@ -447,7 +449,9 @@ export default function AfricanCasino() {
                 ? t('inviteCasino', { name: invite.fromName, n: invite.capacity ?? 2 })
                 : invite.game === 'dominoes'
                   ? t(invite.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: invite.fromName })
-                  : t('inviteMemory', { name: invite.fromName })}{' '}
+                  : invite.game === 'international-draughts'
+                    ? t('inviteDraughts', { name: invite.fromName, game: gameTitle('international-draughts') })
+                    : t('inviteMemory', { name: invite.fromName })}{' '}
               {t('expiresIn', { seconds: Math.max(0, Math.ceil((invite.expiresAt - now) / 1000)) })}
             </p>
             <div className="mt-6 flex flex-col gap-2">

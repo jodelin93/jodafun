@@ -1,17 +1,26 @@
 import type { LucideIcon } from 'lucide-react';
 import type { homeMessages } from '../i18n/messages/home';
-import { Brain, ChessKnight, Dices, Grid3x3, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
+import type { gameNameMessages } from '../i18n/messages/gameNames';
+import { Brain, ChessKnight, CircleDot, Dices, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
 
 type MessageKey = keyof (typeof homeMessages)['en'];
+export type GameNameKey = keyof (typeof gameNameMessages)['en'];
 
 // Games with a real page and rooms behind them
-export type PlayableGameId = 'joda-memory' | 'african-casino' | 'dominoes';
+export type PlayableGameId = 'joda-memory' | 'african-casino' | 'dominoes' | 'international-draughts';
 
-// Proper names, never translated
+// Proper names, never translated, except the games in TRANSLATED_NAMES (for those this is only the
+// English fallback; show names through useGameTitle)
 export const GAME_TITLES: Record<PlayableGameId, string> = {
   'joda-memory': 'Joda Memory',
   'african-casino': 'Joda Casino',
   dominoes: 'Dominoes',
+  'international-draughts': 'International Draughts',
+};
+
+// Games whose name and subtitle are translated (app/i18n/messages/gameNames.ts)
+export const TRANSLATED_NAMES: Partial<Record<string, { title: GameNameKey; subtitle: GameNameKey }>> = {
+  'international-draughts': { title: 'draughtsTitle', subtitle: 'draughtsSubtitle' },
 };
 
 // True for a game id the site has rooms for (e.g. a server's `gameType` or a saved room's `game`)
@@ -66,6 +75,16 @@ export const GAMES: Game[] = [
     available: true,
   },
   {
+    id: 'international-draughts',
+    title: 'International Draughts', // shown translated (useGameTitle)
+    description: 'descDraughts',
+    Icon: CircleDot,
+    players: '2',
+    duration: '15–45',
+    tags: ['tagBoardGame', 'tagStrategy', 'tagClassic'],
+    available: true,
+  },
+  {
     id: 'classic-chess',
     title: 'Classic Chess',
     description: 'descChess',
@@ -73,16 +92,6 @@ export const GAMES: Game[] = [
     players: '2',
     duration: '15–60',
     tags: ['tagStrategy', 'tagClassic', 'tagTurnBased'],
-    available: false,
-  },
-  {
-    id: 'speed-checkers',
-    title: 'Speed Checkers',
-    description: 'descCheckers',
-    Icon: Grid3x3,
-    players: '2',
-    duration: '10–20',
-    tags: ['tagStrategy', 'tagFastPaced', 'tagClassic'],
     available: false,
   },
   {

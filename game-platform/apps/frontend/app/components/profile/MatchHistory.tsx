@@ -4,28 +4,36 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Reac
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import { useLocale, useT } from '../../i18n/I18nProvider';
 import { profileMessages } from '../../i18n/messages/profile';
-import { GAME_TITLES, type PlayableGameId } from '../../lib/games';
+import type { PlayableGameId } from '../../lib/games';
+import { useGameTitle } from '../../lib/useGameTitle';
 import {
   fetchMyCasinoHistory,
   fetchMyDominoesHistory,
+  fetchMyDraughtsHistory,
   fetchMyHistory,
   relativeDate,
   UnauthorizedError,
   type CasinoHistoryItem,
   type CasinoPlayer,
+  type DraughtsHistoryItem,
+  type GameResult,
   type HistoryItem,
 } from '../../lib/users';
 
-const HISTORY_GAMES: PlayableGameId[] = ['joda-memory', 'african-casino', 'dominoes'];
+const HISTORY_GAMES: PlayableGameId[] = ['joda-memory', 'african-casino', 'dominoes', 'international-draughts'];
 
-function ResultChips({ won, forfeit }: { won: boolean; forfeit: boolean }) {
+// The ways a draughts game ends, as the history labels them (EndReason on the server)
+const DRAUGHTS_REASONS = ['no-pieces', 'blocked', 'resignation', 'forfeit', 'agreement', 'repetition', 'kings-25', 'endgame-16', 'long-diagonal-5', 'endgame-5'] as const;
+
+function ResultChips({ result, forfeit }: { result: GameResult; forfeit: boolean }) {
   const t = useT(profileMessages);
+  const won = result === 'win';
   return (
     <>
       <span
-        className={`chip px-2.5 py-0.5 font-semibold ${won ? 'bg-gold/10 text-white ring-2 ring-gold' : ''}`}
+        className={`chip px-2.5 py-0.5 font-semibold ${won ? 'bg-gold/10 text-white ring-2 ring-gold' : result === 'draw' ? 'text-white ring-chalk/60' : ''}`}
       >
-        {won ? t('win') : t('loss')}
+        {won ? t('win') : result === 'draw' ? t('draw') : t('loss')}
       </span>
       {forfeit && <span className="chip px-2.5 py-0.5">{t('forfeit')}</span>}
     </>
@@ -46,7 +54,7 @@ function HistoryRow({ g }: { g: HistoryItem }) {
   const t = useT(profileMessages);
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
-      <ResultChips won={g.result === 'win'} forfeit={g.forfeit} />
+      <ResultChips result={g.result} forfeit={g.forfeit} />
       <span className="min-w-0 flex-1 break-words font-semibold">{g.opponentName ?? t('anonymousPlayer')}</span>
       <span className="text-sm text-chalk">
         {t('score', { won: g.roundsWon, lost: g.roundsLost })}
@@ -68,7 +76,7 @@ function CasinoRow({ g, game = 'african-casino' }: { g: CasinoHistoryItem; game?
   };
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
-      <ResultChips won={g.result === 'win'} forfeit={g.forfeit} />
+      <ResultChips result={g.result} forfeit={g.forfeit} />
       <span className="chip px-2.5 py-0.5">
         {game === 'dominoes' ? t((g.mode ?? (g.players === 4 ? 'partners' : 'head-to-head')) === 'partners' ? 'dominoesPartners' : 'dominoesHeadToHead') : t('casinoPlayers', { n: g.players })}
       </span>
@@ -85,6 +93,31 @@ function CasinoRow({ g, game = 'african-casino' }: { g: CasinoHistoryItem; game?
         <span className="sr-only">{t('casinoScoreSr', { for: g.teamPoints, against: g.opponentPoints })}</span>
       </span>
       <PlayedAt iso={g.playedAt} />
+    </li>
+  );
+}
+
+// A draughts game: result, colour played, opponent, how it ended and its length
+function DraughtsRow({ g }: { g: DraughtsHistoryItem }) {
+  const t = useT(profileMessages);
+  const known = (DRAUGHTS_REASONS as readonly (string | null)[]).includes(g.reason);
+  const reason = known ? t(`reason_${g.reason as (typeof DRAUGHTS_REASONS)[number]}`) : g.reason;
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
+      <ResultChips result={g.result} forfeit={g.forfeit} />
+      <span className="chip px-2.5 py-0.5">
+        <span
+          aria-hidden="true"
+          className={`h-2.5 w-2.5 rounded-full ring-1 ${g.color === 'white' ? 'bg-card ring-ink/30' : 'bg-ink ring-white/40'}`}
+        />
+        {g.color === 'white' ? t('playedWhite') : t('playedBlack')}
+      </span>
+      <span className="min-w-0 flex-1 break-words font-semibold">{t('casinoVs', { names: g.opponent?.name || t('anonymousPlayer') })}</span>
+      <span className="text-sm text-chalk" title={g.rulesVersion ? t('draughtsRules', { version: g.rulesVersion }) : undefined}>
+        {reason ? `${reason} · ` : ''}
+        {t('draughtsMoves', { n: g.moves })}
+      </span>
+      <PlayedAt iso={g.finishedAt} />
     </li>
   );
 }
@@ -195,6 +228,7 @@ function HistoryList<T extends { id: string }>({
 
 export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () => void }) {
   const t = useT(profileMessages);
+  const { title: gameTitle } = useGameTitle();
   const [game, setGame] = useState<PlayableGameId>('joda-memory');
   // A game's list loads the first time its tab opens, then stays mounted so switching back keeps its pages
   const [opened, setOpened] = useState<PlayableGameId[]>(['joda-memory']);
@@ -250,14 +284,22 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
                 active ? 'bg-gold text-ink' : 'text-chalk hover:text-white'
               }`}
             >
-              {GAME_TITLES[id]}
+              {gameTitle(id)}
             </button>
           );
         })}
       </div>
       {HISTORY_GAMES.filter((id) => opened.includes(id)).map((id) => (
         <div key={id} role="tabpanel" id={`hist-panel-${id}`} aria-labelledby={`hist-tab-${id}`} hidden={id !== game}>
-          {id === 'dominoes' ? (
+          {id === 'international-draughts' ? (
+            <HistoryList
+              fetchPage={fetchMyDraughtsHistory}
+              renderRow={(g) => <DraughtsRow key={g.id} g={g} />}
+              emptyText={t('noDraughtsGamesYet')}
+              playPath="/games/international-draughts"
+              onUnauthorized={onUnauthorized}
+            />
+          ) : id === 'dominoes' ? (
             <HistoryList
               fetchPage={fetchMyDominoesHistory}
               renderRow={(g) => <CasinoRow key={g.id} g={g} game="dominoes" />}
