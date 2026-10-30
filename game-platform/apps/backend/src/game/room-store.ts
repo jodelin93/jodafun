@@ -2,6 +2,8 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CASINO_GAME_TYPE, type CasinoRoom } from '../casino/casino.types';
 import { restoreMatch } from '../casino/engine/match';
+import { DOMINOES_GAME_TYPE, type DominoRoom } from '../dominoes/dominoes.types';
+import { restoreMatch as restoreDominoMatch } from '../dominoes/engine/match';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 // classic: both players share one board and take turns; alternate: each clears the same decks on their own board
@@ -77,9 +79,14 @@ export interface GameRoom {
 }
 
 // Every game's rooms share one store and one code space; gameType tells them apart
-export type StoredRoom = GameRoom | CasinoRoom;
+export type StoredRoom = GameRoom | CasinoRoom | DominoRoom;
 export const isCasinoRoom = (room: StoredRoom | null | undefined): room is CasinoRoom =>
   room?.gameType === CASINO_GAME_TYPE;
+export const isDominoRoom = (room: StoredRoom | null | undefined): room is DominoRoom =>
+  room?.gameType === DOMINOES_GAME_TYPE;
+// Joda Memory rooms (older ones were saved without a gameType)
+export const isMemoryRoom = (room: StoredRoom | null | undefined): room is GameRoom =>
+  !!room && (room.gameType === undefined || room.gameType === 'joda-memory');
 
 const KEY_PREFIX = 'jodafun:room:';
 const TTL_SECONDS = 24 * 60 * 60;
@@ -89,7 +96,7 @@ function serializeRoom(room: StoredRoom): string {
   return JSON.stringify(room);
 }
 
-function deserializeRoom(raw: string): StoredRoom | null {
+export function deserializeRoom(raw: string): StoredRoom | null {
   try {
     const room = JSON.parse(raw);
     if (typeof room?.id !== 'string' || !Array.isArray(room.players)) return null;
@@ -97,6 +104,19 @@ function deserializeRoom(raw: string): StoredRoom | null {
       // A match that fails its card accounting is dropped rather than played on
       if (room.match) room.match = restoreMatch(room.match);
       return room as CasinoRoom;
+    }
+    if (room.gameType === DOMINOES_GAME_TYPE) {
+      // A match that fails its tile accounting is dropped (the seats and unsaved results are kept)
+      if (room.match) {
+        try {
+          room.match = restoreDominoMatch(room.match);
+        } catch (error) {
+          console.error(`Dropping an invalid Dominoes match in room ${room.id}:`, error);
+          room.match = null;
+          room.status = 'lobby';
+        }
+      }
+      return room as DominoRoom;
     }
     room.gameStartedAt = room.gameStartedAt ? new Date(room.gameStartedAt) : null;
     return room as GameRoom;
@@ -128,15 +148,20 @@ export class RoomStore implements OnModuleDestroy {
     return this.redis !== null;
   }
 
-  // Joda Memory rooms only; a Casino room's code is not a Memory room
+  // Joda Memory rooms only; a Casino or Dominoes room's code is not a Memory room
   get(code: string): GameRoom | undefined {
     const room = this.cache.get(code);
-    return room && !isCasinoRoom(room) ? room : undefined;
+    return isMemoryRoom(room) ? room : undefined;
   }
 
   getCasino(code: string): CasinoRoom | undefined {
     const room = this.cache.get(code);
     return isCasinoRoom(room) ? room : undefined;
+  }
+
+  getDominoes(code: string): DominoRoom | undefined {
+    const room = this.cache.get(code);
+    return isDominoRoom(room) ? room : undefined;
   }
 
   gameTypeOf(code: string): string | undefined {
@@ -151,11 +176,15 @@ export class RoomStore implements OnModuleDestroy {
 
   // Joda Memory rooms only
   values(): GameRoom[] {
-    return [...this.cache.values()].filter((room): room is GameRoom => !isCasinoRoom(room));
+    return [...this.cache.values()].filter(isMemoryRoom);
   }
 
   casinoRooms(): CasinoRoom[] {
     return [...this.cache.values()].filter(isCasinoRoom);
+  }
+
+  dominoRooms(): DominoRoom[] {
+    return [...this.cache.values()].filter(isDominoRoom);
   }
 
   allRooms(): StoredRoom[] {

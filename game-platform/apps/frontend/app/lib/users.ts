@@ -30,6 +30,8 @@ export interface UserStats {
   bestStreak: number;
   solo: Record<Difficulty, SoloBest | null>;
   casino?: CasinoStats;
+  // Dominoes results, same shape as Casino: twoPlayer is head-to-head, fourPlayer is partners
+  dominoes?: CasinoStats;
 }
 
 export interface PublicProfile {
@@ -73,6 +75,7 @@ export interface CasinoHistoryItem {
   opponentPoints: number;
   teammates: CasinoPlayer[];
   opponents: CasinoPlayer[];
+  mode?: 'head-to-head' | 'partners'; // Dominoes rows only
 }
 
 export interface CasinoHistoryPage {
@@ -115,6 +118,13 @@ export function fetchMyHistory(cursor: string | null, signal?: AbortSignal) {
 
 export function fetchMyCasinoHistory(cursor: string | null, signal?: AbortSignal) {
   const q = new URLSearchParams({ game: 'african-casino', limit: '20' });
+  if (cursor) q.set('cursor', cursor);
+  return getJson<CasinoHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
+}
+
+// Dominoes history rows have the same shape as Casino's
+export function fetchMyDominoesHistory(cursor: string | null, signal?: AbortSignal) {
+  const q = new URLSearchParams({ game: 'dominoes', limit: '20' });
   if (cursor) q.set('cursor', cursor);
   return getJson<CasinoHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
 }

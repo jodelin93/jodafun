@@ -4,6 +4,7 @@ import type { SessionUser } from '../auth/session';
 import { RoomStore } from '../game/room-store';
 import { generateRoomCode, normalizeRoomCode } from '../game/game.utils';
 import { presenceName } from '../game/presence';
+import type { SeatListener, TeamRoomGame } from '../game/team-room';
 import { secureRandomInt, shuffle, type RandomInt } from './engine/cards';
 import {
   createMatch,
@@ -65,13 +66,13 @@ const validKey = (key: unknown): key is string => typeof key === 'string' && key
  * input and resolves who is asking. The process that owns the RoomStore owns every room.
  */
 @Injectable()
-export class CasinoService implements OnModuleInit, OnModuleDestroy {
+export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGame {
   private emitter: CasinoEmitter | null = null;
   private queues = new Map<string, Promise<unknown>>();
   private graceTimers = new Map<string, NodeJS.Timeout>(); // by player id
   private saving = new Set<string>(); // match ids being written
   // Tells the rest of the platform (presence, invitations) when a socket takes or leaves a seat
-  seatListener: { seated: (socketId: string) => void; unseated: (socketId: string) => void } | null = null;
+  seatListener: SeatListener | null = null;
   random: RandomInt = secureRandomInt;
 
   constructor(
@@ -157,6 +158,8 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy {
 
   // Joins a free seat, or takes back this player's own seat (refresh, reconnect, another tab)
   join(socketId: string, user: SessionUser | null, input: { roomId?: unknown; name?: unknown; playerKey?: unknown }) {
+    const other = this.otherGame(input.roomId);
+    if (other) return Promise.resolve(other);
     return this.inRoom(input.roomId, room => {
       if (!user) return fail('AUTH_REQUIRED');
       if (!validKey(input.playerKey)) return fail('BAD_REQUEST');
@@ -182,6 +185,8 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy {
 
   // Only takes back an existing seat; never sits a newcomer down
   rejoin(socketId: string, user: SessionUser | null, input: { roomId?: unknown; playerKey?: unknown }) {
+    const other = this.otherGame(input.roomId);
+    if (other) return Promise.resolve(other);
     return this.inRoom(input.roomId, room => {
       if (!user) return fail('AUTH_REQUIRED');
       const own = this.ownSeat(room, user, input.playerKey);
@@ -587,6 +592,12 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy {
     const room = this.rooms.getCasino(normalizeRoomCode(roomId));
     const player = room?.players.find(p => p.socketId === socketId);
     return room && player ? { room, player } : null;
+  }
+
+  // A code that belongs to another game's room: the client opens that game instead
+  private otherGame(roomId: unknown): CasinoAck<never> | null {
+    const gameType = this.rooms.gameTypeOf(normalizeRoomCode(roomId));
+    return gameType && gameType !== CASINO_GAME_TYPE ? fail('WRONG_GAME', { params: { gameType } }) : null;
   }
 
   private inRoom<T>(roomId: unknown, fn: (room: CasinoRoom) => T): Promise<T | CasinoAck<never>> {

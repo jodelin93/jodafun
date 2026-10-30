@@ -6,6 +6,9 @@ import { DIFFICULTIES, Difficulty } from '../scores/scores.dto';
 
 const GAME_TYPE = 'joda-memory';
 const CASINO = 'african-casino';
+const DOMINOES = 'dominoes';
+// Games recorded in game_participants (one row per seat, with teams)
+export type TeamGameType = typeof CASINO | typeof DOMINOES;
 
 type SoloBest = { bestTimeSeconds: number; bestMoves: number; runs: number } | null;
 
@@ -102,12 +105,13 @@ export class UsersService {
         ? Math.round((totals.wins / totals.gamesPlayed) * 1000) / 10
         : 0,
       solo,
-      casino: await this.getCasinoStats(userId),
+      casino: await this.getTeamGameStats(userId, CASINO),
+      dominoes: await this.getTeamGameStats(userId, DOMINOES),
     };
   }
 
-  // Joda Casino results: points are match points, never Memory pairs or times
-  async getCasinoStats(userId: string) {
+  // Joda Casino and Dominoes results: points are match points, never Memory pairs or times
+  async getTeamGameStats(userId: string, gameType: TeamGameType) {
     const [row] = await this.prisma.$queryRaw<
       { gamesPlayed: number; wins: number; twoPlayer: number; fourPlayer: number; pointsFor: number; pointsAgainst: number }[]
     >`
@@ -119,7 +123,7 @@ export class UsersService {
              COALESCE(SUM((g.settings->'scores'->>(1 - p.team))::int), 0)::int AS "pointsAgainst"
       FROM game_participants p
       JOIN games g ON g.id = p.game_id
-      WHERE p.user_id = ${userId} AND g.game_type = ${CASINO}`;
+      WHERE p.user_id = ${userId} AND g.game_type = ${gameType}`;
     return {
       ...row,
       losses: row.gamesPlayed - row.wins,
@@ -127,8 +131,8 @@ export class UsersService {
     };
   }
 
-  // One row per Casino match the user played, with their teammate and opponents by name
-  async getCasinoHistory(userId: string, cursor: string | undefined, limit: number) {
+  // One row per Casino or Dominoes match the user played, with their teammate and opponents by name
+  async getTeamGameHistory(userId: string, gameType: TeamGameType, cursor: string | undefined, limit: number) {
     let after = Prisma.empty;
     if (cursor) {
       const row = await this.prisma.gameParticipant.findFirst({
@@ -147,13 +151,21 @@ export class UsersService {
         result: 'win' | 'loss';
         team: number;
         seat: number;
-        settings: { players?: number; targetPoints?: number; scores?: number[]; hands?: number; forfeit?: boolean } | null;
+        settings: {
+          players?: number;
+          targetPoints?: number; // Casino
+          targetScore?: number; // Dominoes
+          mode?: string; // Dominoes
+          scores?: number[];
+          hands?: number;
+          forfeit?: boolean;
+        } | null;
       }[]
     >`
       SELECT p.id, p.game_id AS "gameId", g.completed_at AS "playedAt", p.result, p.team, p.seat, g.settings
       FROM game_participants p
       JOIN games g ON g.id = p.game_id
-      WHERE p.user_id = ${userId} AND g.game_type = ${CASINO} ${after}
+      WHERE p.user_id = ${userId} AND g.game_type = ${gameType} ${after}
       ORDER BY g.completed_at DESC, p.id DESC
       LIMIT ${limit + 1}`;
     const page = rows.slice(0, limit);
@@ -173,7 +185,9 @@ export class UsersService {
           playedAt: r.playedAt,
           result: r.result,
           players: r.settings?.players === 4 ? 4 : 2,
-          targetPoints: r.settings?.targetPoints ?? null,
+          // Dominoes rows carry the same fields (the target score as targetPoints) plus the mode
+          ...(gameType === DOMINOES ? { mode: r.settings?.mode === 'partners' ? 'partners' : 'head-to-head' } : {}),
+          targetPoints: (gameType === DOMINOES ? r.settings?.targetScore : r.settings?.targetPoints) ?? null,
           hands: r.settings?.hands ?? null,
           forfeit: r.settings?.forfeit === true,
           teamPoints: scores[r.team] ?? 0,

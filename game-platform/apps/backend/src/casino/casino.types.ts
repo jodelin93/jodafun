@@ -66,6 +66,7 @@ export type CasinoErrorCode =
   | RuleErrorCode
   | 'AUTH_REQUIRED'
   | 'ROOM_NOT_FOUND'
+  | 'WRONG_GAME' // the code belongs to another game; params.gameType says which
   | 'ROOM_FULL'
   | 'GAME_STARTED'
   | 'NOT_SEATED'
@@ -81,7 +82,7 @@ export type CasinoErrorCode =
 
 export type CasinoAck<T = object> =
   | ({ ok: true } & T)
-  | { ok: false; code: CasinoErrorCode; params?: RuleError['params']; action?: number; version?: number };
+  | { ok: false; code: CasinoErrorCode; params?: RuleError['params'] & { gameType?: string }; action?: number; version?: number };
 
 export interface PublicSeat {
   seat: number;

@@ -8,8 +8,8 @@ import SoundControls from './SoundControls';
 import SiteHeader from './ui/SiteHeader';
 import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
-import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
-import type { PlayableGameId } from '../lib/games';
+import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../lib/currentRoom';
+import { isPlayableGameId, type PlayableGameId } from '../lib/games';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
 import ShareRoomButton from './ShareRoomButton';
 import AlternateRoom, { AltOpponentLine, formatAltTime, type AltRoomState } from './AlternateRoom';
@@ -630,9 +630,9 @@ export default function JodaMemory() {
           applyReclaimedSeat(response, socket.id);
           return;
         }
-        // A Joda Casino room code: that page reclaims the seat itself
-        if (response?.gameType === 'african-casino') {
-          router.replace('/games/african-casino?roomId=' + currentRoomId);
+        // Another game's room code (Joda Casino, Dominoes): that page reclaims the seat itself
+        if (isPlayableGameId(response?.gameType) && response.gameType !== 'joda-memory') {
+          router.replace(roomPath(currentRoomId, response.gameType));
           return;
         }
         // Opening a link we have no seat in: stay on the join step (and forget a room that no longer exists)
@@ -671,7 +671,7 @@ export default function JodaMemory() {
         fromName: data.from?.name || '',
         mode: data.mode === 'alternate' ? 'alternate' : 'classic',
         expiresAt: data.expiresAt,
-        game: data.game === 'african-casino' ? 'african-casino' : 'joda-memory',
+        game: isPlayableGameId(data.game) ? data.game : 'joda-memory',
         capacity: data.capacity,
       });
     });
@@ -1219,10 +1219,10 @@ export default function JodaMemory() {
         setIncomingInvite(null);
         return;
       }
-      // A Joda Casino request: the seat is ours, the Casino page sits us down with the same player key
-      if (res?.success && res.game === 'african-casino' && res.roomId) {
+      // A Joda Casino or Dominoes request: the seat is ours, that game's page sits us down with the same player key
+      if (res?.success && (res.game === 'african-casino' || res.game === 'dominoes') && res.roomId) {
         setIncomingInvite(null);
-        router.push('/games/african-casino?roomId=' + res.roomId);
+        router.push(roomPath(res.roomId, res.game));
         return;
       }
       if (res?.success && res.room) {
@@ -1292,9 +1292,9 @@ export default function JodaMemory() {
     try {
       const socket = socketRef.current;
       socket.emit('joinGame', { roomId: targetRoom, playerName: playerName.trim(), playerKey: getPlayerKey() }, (response: any) => {
-        // A Joda Casino room code: send the player to that game instead of showing an error
-        if (!response.success && response.gameType === 'african-casino') {
-          router.replace('/games/african-casino?roomId=' + targetRoom);
+        // Another game's room code (Joda Casino, Dominoes): send the player to that game instead of showing an error
+        if (!response.success && isPlayableGameId(response.gameType) && response.gameType !== 'joda-memory') {
+          router.replace(roomPath(targetRoom, response.gameType));
           return;
         }
         if (response.success && response.rejoined) {
@@ -1700,7 +1700,9 @@ export default function JodaMemory() {
               <p className="mt-2 text-chalk">
                 {incomingInvite.game === 'african-casino'
                   ? t(incomingInvite.capacity === 4 ? 'inviteBodyCasinoTeams' : 'inviteBodyCasino', { name: incomingInvite.fromName || t('aPlayer') })
-                  : incomingInvite.mode === 'alternate'
+                  : incomingInvite.game === 'dominoes'
+                    ? t(incomingInvite.capacity === 4 ? 'inviteBodyDominoesTeams' : 'inviteBodyDominoes', { name: incomingInvite.fromName || t('aPlayer') })
+                    : incomingInvite.mode === 'alternate'
                     ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
                     : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
                 {gameStarted && gameMode === 'single' ? `${t('acceptingEndsSolo')} ` : ''}

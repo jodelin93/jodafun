@@ -1,5 +1,3 @@
-import { randomInt } from 'crypto';
-
 export type Suit = 'S' | 'H' | 'D' | 'C';
 export const SUITS: readonly Suit[] = ['S', 'H', 'D', 'C'];
 const RANK_LABELS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
@@ -44,15 +42,4 @@ export function cardPoints(id: string): number {
 }
 
 // Uniform integer in [0, max); production draws from crypto, tests inject a seeded generator
-export type RandomInt = (max: number) => number;
-export const secureRandomInt: RandomInt = max => randomInt(max);
-
-// Fisher-Yates, returning a new array
-export function shuffle<T>(items: readonly T[], random: RandomInt): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = random(i + 1);
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
+export { secureRandomInt, shuffle, type RandomInt } from '../../lib/random';

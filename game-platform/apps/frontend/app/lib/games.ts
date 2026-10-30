@@ -1,17 +1,21 @@
 import type { LucideIcon } from 'lucide-react';
 import type { homeMessages } from '../i18n/messages/home';
-import { Brain, ChessKnight, Grid3x3, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
+import { Brain, ChessKnight, Dices, Grid3x3, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
 
 type MessageKey = keyof (typeof homeMessages)['en'];
 
 // Games with a real page and rooms behind them
-export type PlayableGameId = 'joda-memory' | 'african-casino';
+export type PlayableGameId = 'joda-memory' | 'african-casino' | 'dominoes';
 
 // Proper names, never translated
 export const GAME_TITLES: Record<PlayableGameId, string> = {
   'joda-memory': 'Joda Memory',
   'african-casino': 'Joda Casino',
+  dominoes: 'Dominoes',
 };
+
+// True for a game id the site has rooms for (e.g. a server's `gameType` or a saved room's `game`)
+export const isPlayableGameId = (value: unknown): value is PlayableGameId => typeof value === 'string' && Object.prototype.hasOwnProperty.call(GAME_TITLES, value);
 
 export type Game = {
   id: string;
@@ -48,6 +52,17 @@ export const GAMES: Game[] = [
     playersLabel: 'playersTwoOrFour',
     duration: '20–40',
     tags: ['tagCards', 'tagStrategy', 'tagTeams'],
+    available: true,
+  },
+  {
+    id: 'dominoes',
+    title: 'Dominoes',
+    description: 'descDominoes',
+    Icon: Dices,
+    players: '2–4',
+    playersLabel: 'playersTwoOrFour',
+    duration: '20–45',
+    tags: ['tagTiles', 'tagStrategy', 'tagTeams'],
     available: true,
   },
   {

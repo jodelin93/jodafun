@@ -29,6 +29,19 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
         { label: t('pointsAgainst'), value: casino.pointsAgainst },
       ]
     : [];
+  // Dominoes points are match points too, kept apart from both other games
+  const dominoes = stats.dominoes;
+  const dominoesFigures = dominoes
+    ? [
+        { label: t('games'), value: dominoes.gamesPlayed },
+        { label: t('wins'), value: dominoes.wins },
+        { label: t('winRate'), value: `${dominoes.winRate}%` },
+        { label: t('dominoesGamesTwo'), value: dominoes.twoPlayer },
+        { label: t('dominoesGamesFour'), value: dominoes.fourPlayer },
+        { label: t('pointsFor'), value: dominoes.pointsFor },
+        { label: t('pointsAgainst'), value: dominoes.pointsAgainst },
+      ]
+    : [];
   return (
     <>
       <section aria-labelledby="stats-h" className="mt-8">
@@ -95,6 +108,23 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
             ))}
           </dl>
           <p className="mt-2 text-sm text-chalk">{t('casinoPointsNote')}</p>
+        </section>
+      )}
+
+      {dominoes && (
+        <section aria-labelledby="dominoes-h" className="mt-8">
+          <h2 id="dominoes-h" className="title-md">
+            {GAME_TITLES.dominoes}
+          </h2>
+          <dl className="panel mt-3 grid grid-cols-2 gap-x-4 gap-y-4 p-4 sm:grid-cols-4 sm:p-5">
+            {dominoesFigures.map((f) => (
+              <div key={f.label}>
+                <dt className="text-sm text-chalk">{f.label}</dt>
+                <dd className="font-display text-2xl font-bold">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-2 text-sm text-chalk">{t('dominoesPointsNote')}</p>
         </section>
       )}
     </>

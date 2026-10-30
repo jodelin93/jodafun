@@ -31,6 +31,8 @@ export function useCasinoRoom(onSeatLost: () => void, userId: string | null) {
   const [room, setRoom] = useState<CasinoRoomView | null>(null);
   const [mine, setMine] = useState<CasinoPrivateView | null>(null);
   const roomIdRef = useRef<string | null>(null);
+  // True only once a join or rejoin succeeded (roomIdRef is set earlier, while one is in flight)
+  const seatedRef = useRef(false);
   // The latest views of each room, kept even before we know we're in it: the first broadcast can
   // arrive before the answer to create or join
   const latest = useRef(new Map<string, { room?: CasinoRoomView; mine?: CasinoPrivateView }>());
@@ -61,7 +63,8 @@ export function useCasinoRoom(onSeatLost: () => void, userId: string | null) {
     const onConnect = async () => {
       setConnection('online');
       const roomId = roomIdRef.current;
-      if (!roomId) return;
+      // A newcomer still asking for a seat hasn't lost one
+      if (!roomId || !seatedRef.current) return;
       const ack = await ask(socket, 'casino:rejoin', { roomId, playerKey: getPlayerKey() });
       if (!ack.ok && (ack.code === 'NOT_SEATED' || ack.code === 'ROOM_NOT_FOUND')) {
         onSeatLostRef.current();
@@ -103,6 +106,7 @@ export function useCasinoRoom(onSeatLost: () => void, userId: string | null) {
 
   const enter = useCallback((roomId: string | null) => {
     roomIdRef.current = roomId;
+    seatedRef.current = roomId !== null;
     const known = roomId ? latest.current.get(roomId) : undefined;
     setRoom(known?.room ?? null);
     setMine(known?.mine ?? null);

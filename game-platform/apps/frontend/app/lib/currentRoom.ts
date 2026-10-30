@@ -2,13 +2,14 @@
 // can get back while the server still holds their seat (5 minutes in the lobby, 60 seconds mid-game,
 // a day in an alternate room).
 
-import type { PlayableGameId } from './games';
+import { isPlayableGameId, type PlayableGameId } from './games';
 
 const KEY = 'joda-current-room';
 const CHANGE_EVENT = 'joda-current-room';
 const HOLD_MS = 5 * 60 * 1000;
 
-// Records saved before Joda Casino existed have no `game`; they are Joda Memory rooms
+// Records saved before Joda Casino existed have no `game`; they are Joda Memory rooms (as is any game
+// id this version doesn't know)
 export type CurrentRoom = { roomId: string; savedAt: number; holdMs?: number; game?: PlayableGameId };
 
 export function readCurrentRoom(): CurrentRoom | null {
@@ -22,7 +23,7 @@ export function readCurrentRoom(): CurrentRoom | null {
       localStorage.removeItem(KEY);
       return null;
     }
-    const game: PlayableGameId = value.game === 'african-casino' ? 'african-casino' : 'joda-memory';
+    const game: PlayableGameId = isPlayableGameId(value.game) ? value.game : 'joda-memory';
     return { roomId: value.roomId, savedAt: value.savedAt, holdMs, game };
   } catch {
     return null;

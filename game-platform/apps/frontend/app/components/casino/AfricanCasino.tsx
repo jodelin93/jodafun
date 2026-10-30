@@ -9,7 +9,8 @@ import SiteFooter from '../ui/SiteFooter';
 import Loading from '../ui/Loading';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
-import { clearCurrentRoom, saveCurrentRoom } from '../../lib/currentRoom';
+import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../../lib/currentRoom';
+import { isPlayableGameId, type PlayableGameId } from '../../lib/games';
 import { getPlayerKey } from '../../lib/playerKey';
 import { useCasinoRoom } from '../../lib/casino/useCasinoRoom';
 import { teamOfSeat, type TurnAction, type TurnProposal } from '../../lib/casino/types';
@@ -22,7 +23,7 @@ import CasinoRules from './CasinoRules';
 import CasinoTutorial from './CasinoTutorial';
 
 type Screen = 'menu' | 'rules' | 'tutorial';
-type Invite = { inviteId: string; fromName: string; game: 'joda-memory' | 'african-casino'; capacity?: number; expiresAt: number };
+type Invite = { inviteId: string; fromName: string; game: PlayableGameId; capacity?: number; expiresAt: number };
 
 const isDefaultGuestName = (name: string | null | undefined) => !name || /^Guest [0-9a-f]{8}$/i.test(name);
 const ROOM_HOLD_MS = 5 * 60 * 1000;
@@ -72,6 +73,14 @@ export default function AfricanCasino() {
   const { room, mine, connection, socket } = casino;
   const inRoom = !!room && !!mine;
 
+  // A code from another game (WRONG_GAME names it): that game's page takes over
+  const otherGame = (ack: { ok: boolean; code?: string; params?: { gameType?: string } }, roomId: string) => {
+    const gameType = ack.params?.gameType;
+    if (ack.ok || ack.code !== 'WRONG_GAME' || !isPlayableGameId(gameType) || gameType === 'african-casino') return false;
+    router.replace(roomPath(roomId, gameType));
+    return true;
+  };
+
   // The account's chosen name, but not an auto-generated guest one
   useEffect(() => {
     if (user && !name && !isDefaultGuestName(user.name)) setName(user.name);
@@ -86,7 +95,7 @@ export default function AfricanCasino() {
     void casino.rejoin(urlRoom).then(ack => {
       if (!live) return;
       setRestoring(false);
-      if (!ack.ok) {
+      if (!ack.ok && !otherGame(ack, urlRoom)) {
         if (ack.code === 'ROOM_NOT_FOUND') {
           setError(errorText('ROOM_NOT_FOUND'));
           setUrlRoom(null);
@@ -123,7 +132,7 @@ export default function AfricanCasino() {
   useEffect(() => {
     const received = (d: { inviteId: string; from?: { name?: string }; game?: string; capacity?: number; expiresAt: number }) => {
       setNow(Date.now());
-      setInvite({ inviteId: d.inviteId, fromName: d.from?.name ?? '', game: d.game === 'african-casino' ? 'african-casino' : 'joda-memory', capacity: d.capacity, expiresAt: d.expiresAt });
+      setInvite({ inviteId: d.inviteId, fromName: d.from?.name ?? '', game: isPlayableGameId(d.game) ? d.game : 'joda-memory', capacity: d.capacity, expiresAt: d.expiresAt });
     };
     const drop = (d: { inviteId: string }) => setInvite(i => (i?.inviteId === d.inviteId ? null : i));
     socket.on('invite:received', received);
@@ -150,6 +159,8 @@ export default function AfricanCasino() {
       if (res.game === 'african-casino' && res.roomId) {
         setUrlRoom(res.roomId);
         void casino.rejoin(res.roomId);
+      } else if (res.game === 'dominoes' && res.roomId) {
+        router.push(roomPath(res.roomId, 'dominoes'));
       } else if (res.room) {
         router.push(`/games/joda-memory?roomId=${res.room.id}`);
       }
@@ -175,7 +186,7 @@ export default function AfricanCasino() {
     if (ack.ok) {
       setUrlRoom(ack.roomId);
       setLinkRoom(null);
-    } else setError(errorText(ack.code));
+    } else if (!otherGame(ack, codeName)) setError(errorText(ack.code));
   };
 
   const leave = async () => {
@@ -420,7 +431,9 @@ export default function AfricanCasino() {
             <p className="mt-2 text-chalk">
               {invite.game === 'african-casino'
                 ? t('inviteCasino', { name: invite.fromName, n: invite.capacity ?? 2 })
-                : t('inviteMemory', { name: invite.fromName })}{' '}
+                : invite.game === 'dominoes'
+                  ? t(invite.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: invite.fromName })
+                  : t('inviteMemory', { name: invite.fromName })}{' '}
               {t('expiresIn', { seconds: Math.max(0, Math.ceil((invite.expiresAt - now) / 1000)) })}
             </p>
             <div className="mt-6 flex flex-col gap-2">

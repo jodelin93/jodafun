@@ -14,10 +14,10 @@ const result = (winnerTeam: number | null = 1): CasinoResult => ({
         dealer: 3,
         lastCapturer: 2,
         teams: [
-          { cards: 25, spades: 6, mostCards: 0, mostSpades: 2, twoOfSpades: 0, tenOfDiamonds: 2, aces: 1, total: 5 },
-          { cards: 27, spades: 7, mostCards: 2, mostSpades: 0, twoOfSpades: 1, tenOfDiamonds: 0, aces: 3, total: 6 },
+          { cards: 25, total: 0 },
+          { cards: 27, total: 1 },
         ],
-        scoresAfter: [5, 6],
+        scoresAfter: [0, 1],
       },
     ],
     finishedAt: 2_000,
@@ -56,7 +56,7 @@ describe('CasinoResults', () => {
       [2, 0, 'loss', 14],
       [3, 1, 'win', 23],
     ]);
-    expect(data.hands.create).toEqual([expect.objectContaining({ handNumber: 1, dealerSeat: 3, pointsTeam0: 5, pointsTeam1: 6 })]);
+    expect(data.hands.create).toEqual([expect.objectContaining({ handNumber: 1, dealerSeat: 3, pointsTeam0: 0, pointsTeam1: 1 })]);
   });
 
   it('does nothing when the match is already stored', async () => {

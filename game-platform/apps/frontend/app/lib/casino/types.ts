@@ -127,7 +127,7 @@ export interface TurnProposal {
 export interface RuleError {
   code: string;
   action?: number;
-  params?: { value?: number; cards?: string[]; build?: string };
+  params?: { value?: number; cards?: string[]; build?: string; gameType?: string };
 }
 
 export type CasinoAck<T = object> = ({ ok: true } & T) | ({ ok: false; code: string; version?: number } & Omit<RuleError, 'code'>);

@@ -25,8 +25,8 @@ export class UsersController {
   @UseGuards(SessionGuard)
   getMyHistory(@Req() req: any, @Query() query: HistoryQueryDto) {
     const limit = Number(query.limit ?? 20);
-    if (query.game === 'african-casino') {
-      return this.usersService.getCasinoHistory(req.sessionUser.id, query.cursor, limit);
+    if (query.game === 'african-casino' || query.game === 'dominoes') {
+      return this.usersService.getTeamGameHistory(req.sessionUser.id, query.game, query.cursor, limit);
     }
     return this.usersService.getHistory(req.sessionUser.id, query.cursor, limit);
   }
