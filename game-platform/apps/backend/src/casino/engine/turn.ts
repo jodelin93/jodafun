@@ -1,5 +1,5 @@
 import { DECK, canCapture, captureValues, isAce, isCardId, rankForValue, rankOf } from './cards';
-import { findAddableSet, findSetWithValue, setMatches, sum, valueInSet } from './sets';
+import { findSetWithValue, setMatches, sum, valueInSet } from './sets';
 import type {
   ActionSummary,
   AceValue,
@@ -389,16 +389,7 @@ function checkFinalPosition(w: Work) {
     if (w.played.kind === 'discard' && owned.length > 0) fail('DISCARD_WHILE_OWNING');
     if (owned.length > 1) fail('TOO_MANY_BUILDS');
   }
-
-  // House policy: cards that could be added to your side's builds must be added. A pile card that
-  // this turn exposed was not visible when the turn was chosen, so it is not demanded.
-  const top = w.pileUsed ? null : pileTop(w.s, 1 - w.team);
-  for (const b of w.s.builds.filter(b => teamOf(w.s, b.owner) === w.team)) {
-    const addable = findAddableSet(w.s.loose, top, b.value);
-    if (addable) {
-      fail('MUST_AUGMENT', { value: b.value, build: b.id, cards: [...addable.loose, ...(addable.pile && top ? [top] : [])] });
-    }
-  }
+  // Joda Fun rule: cards that could join your side's builds may be left for later
 }
 
 function newWork(state: MatchState, seat: Seat): Work {

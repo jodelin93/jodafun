@@ -98,13 +98,13 @@ capture when you capture or discard with it, and (b) add to your side's builds a
 exposed pile card that legally could be added before you end your turn. Online, there is nobody to
 ask, so:
 
-- A turn with such an omission is rejected, and the message names the cards that must be completed.
+- A capture or discard with omission (a) is rejected, and the message names the cards that must be completed.
 - (a) is judged at the moment the card is played: after your capture, no remaining loose card or set
   of loose cards may add up to the played value and no build of that value may be left. A discard is
   rejected if the card could have captured something. Building or augmenting with the card instead
   ("drifting") is always allowed.
-- (b) is judged at the end of the turn, for every build your side owns. A pile card uncovered by
-  the submitted turn itself is not demanded, since it wasn't visible when the turn was chosen.
+- (b) is not enforced (Joda Fun rule): cards that could join your side's builds may stay on the
+  table, where anyone can use them later.
 - When different completions are possible (for example three loose 5s and a played 10), any one of
   them is accepted: the player chooses.
 - Nobody should ever be stuck: `legalTurns` builds legal turns from any position, and 300 simulated

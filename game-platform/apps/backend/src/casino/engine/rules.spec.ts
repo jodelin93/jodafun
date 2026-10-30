@@ -290,12 +290,15 @@ describe('augmenting and capture piles', () => {
     );
   });
 
-  it('requires adding cards that could join the side’s builds before the turn ends', () => {
+  it('lets cards that could join the side’s builds stay on the table (Joda Fun rule)', () => {
     const state = scenario({ ...four([['KH', '3C', 'KC'], ['KD'], ['QD'], ['JD']]), loose: ['9S', '4D'], builds: [single('b1', ['8C', '5C'], 13, 2)] });
-    const result = turn(state, 0, { type: 'discard', card: '3C' });
-    expect(errorOf(result)).toBe('MUST_AUGMENT');
-    if (!result.ok) expect([...(result.error.params?.cards ?? [])].sort()).toEqual(['4D', '9S']);
+    expect(turn(state, 0, { type: 'discard', card: '3C' }).ok).toBe(true);
     expect(turn(state, 0, { type: 'augment', build: 'b1', loose: ['9S', '4D'] }, { type: 'discard', card: '3C' }).ok).toBe(true);
+    // Building 2+7 for a 9 held in hand, with another 9 left loose for anyone to take
+    const nine = scenario({ deal: 1, hands: [['7S', '9C', '9D'], ['KD']], loose: ['2H', '9S'] });
+    const next = ok(turn(nine, 0, { type: 'build', hand: '7S', loose: ['2H'] }));
+    expect(next.builds).toEqual([expect.objectContaining({ value: 9, owner: 0 })]);
+    expect(next.loose).toEqual(['9S']);
   });
 
   it('never splits builds or combines them for a capture', () => {
