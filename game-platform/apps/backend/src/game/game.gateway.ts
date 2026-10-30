@@ -23,6 +23,7 @@ import { FiveService } from '../five/five.service';
 import { FIVE_GAME_TYPE } from '../five/five.types';
 import type { TeamRoomGame } from './team-room';
 import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
+import { cleanChatText } from './chat.service';
 import { PresenceState, presenceName, type PresenceEntry, type TeamGameId } from './presence';
 import {
   ALT_ROUNDS,
@@ -72,6 +73,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   private flipLimiter = new RateLimiter(10, 1000);
   private joinLimiter = new RateLimiter(20, 60_000);
   private inviteLimiter = new RateLimiter(10, 60_000);
+  private chatLimiter = new RateLimiter(5, 10_000);
   private presence = new PresenceState();
   // Trailing throttle for presence:changed
   private presenceTimer: NodeJS.Timeout | null = null;
@@ -823,11 +825,17 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       return { success: false, error: 'Player not found' };
     }
 
+    // The client caps messages too, but the server decides: cleaned, at most 300 characters, and
+    // no more than 5 messages per 10 seconds per socket
+    const message = cleanChatText(data?.message);
+    if (!message) return { success: false, error: 'Empty message' };
+    if (!this.chatLimiter.allow(client.id)) return { success: false, error: 'Too many messages' };
+
     // Broadcast the message to all players in the room
     this.server.to(roomId).emit('chatMessage', {
       playerName: sender.name,
       playerId: client.id,
-      message: data.message,
+      message,
       timestamp: new Date().toISOString(),
     });
 

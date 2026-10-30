@@ -323,6 +323,12 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     return { room: found.room, freeSeats: this.freeSeats(found.room).length };
   }
 
+  // The seat sending a chat message in this room, if any
+  chatSender(socketId: string, roomId: unknown) {
+    const found = this.findPlayer(socketId, roomId);
+    return found ? { roomId: found.room.id, playerId: found.player.id, name: found.player.name } : null;
+  }
+
   seatedSocket(socketId: string): boolean {
     return this.seatOf(socketId) !== null;
   }

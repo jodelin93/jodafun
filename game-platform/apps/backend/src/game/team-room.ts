@@ -24,6 +24,8 @@ export interface TeamRoomGame {
     input: { roomId?: unknown; name?: unknown; playerKey?: unknown },
   ): Promise<{ ok: true; roomId: string } | { ok: false; code: string }>;
   seatedSocket(socketId: string): boolean;
+  // Who is sending a chat message: the seat this socket holds in that room, or null
+  chatSender(socketId: string, roomId: unknown): { roomId: string; playerId: string; name: string } | null;
 }
 
 // A paused match: no moves are accepted until it is resumed

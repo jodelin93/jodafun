@@ -63,6 +63,8 @@ export default function TableMenu({ paused, myPlayerId, pauserAway, onPause, onR
           {t('rules')}
         </button>
         {leaveButton}
+        {/* The room chat docks its button here during play (see GameChat) */}
+        <span id="table-menu-chat" className="contents" />
       </nav>
       {error && !paused && (
         <p role="alert" className="mb-3 text-sm text-chalk">

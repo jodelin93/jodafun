@@ -362,6 +362,12 @@ export class FiveService implements OnModuleInit, OnModuleDestroy, TeamRoomGame 
     return { room: { id: room.id, capacity: CAPACITY as 2, players: room.players }, freeSeats: this.freeSeats(room).length };
   }
 
+  // The seat sending a chat message in this room, if any
+  chatSender(socketId: string, roomId: unknown) {
+    const found = this.findPlayer(socketId, roomId);
+    return found ? { roomId: found.room.id, playerId: found.player.id, name: found.player.name } : null;
+  }
+
   seatedSocket(socketId: string): boolean {
     return this.seatOf(socketId) !== null;
   }

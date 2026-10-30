@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, GraduationCap, Spade, Swords } from 'lucide-react';
 import SiteHeader from '../ui/SiteHeader';
 import SiteFooter from '../ui/SiteFooter';
+import GameChat from '../ui/GameChat';
 import Loading from '../ui/Loading';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
@@ -436,6 +437,7 @@ export default function AfricanCasino() {
       <SiteHeader />
       <main className="page flex-1 py-6 sm:py-10">{content}</main>
       <SiteFooter />
+      {inRoom && room && <GameChat socket={socket} game={'african-casino'} roomId={room.id} myPlayerId={mine?.playerId ?? null} docked={room.status === 'playing'} />}
 
       {invite && !inRoom && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-felt-deep/80 p-4">

@@ -14,6 +14,8 @@ import { DraughtsResults } from '../draughts/draughts-results';
 import { FiveGateway } from '../five/five.gateway';
 import { FiveService } from '../five/five.service';
 import { FiveResults } from '../five/five-results';
+import { ChatGateway } from './chat.gateway';
+import { ChatService } from './chat.service';
 
 @Module({
   providers: [
@@ -32,6 +34,8 @@ import { FiveResults } from '../five/five-results';
     FiveService,
     FiveResults,
     FiveGateway,
+    ChatService,
+    ChatGateway,
   ],
 })
 export class GameModule {}
