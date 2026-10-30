@@ -154,6 +154,18 @@ export interface DraughtsOutcome {
   finishedAt: number;
 }
 
+// The match: first to `target` wins in a row (a draw doesn't break a run)
+export interface DraughtsSeries {
+  id: string;
+  games: number;
+  wins: [number, number]; // by seat
+  draws: number;
+  streak: [number, number]; // consecutive wins by seat
+  winnerSeat: 0 | 1 | null;
+  forfeit: boolean;
+  target: number;
+}
+
 export interface DraughtsRoomView {
   id: string;
   gameType: 'international-draughts';
@@ -161,6 +173,7 @@ export interface DraughtsRoomView {
   seats: PublicDraughtsSeat[];
   game: PublicDraughtsView | null;
   outcome: DraughtsOutcome | null;
+  series: DraughtsSeries | null;
   paused: { byId: string; byName: string; since: number } | null;
 }
 

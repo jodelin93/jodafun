@@ -17,7 +17,7 @@ export class DraughtsResults {
   constructor(private prisma: PrismaService) {}
 
   // True when the result is stored (now or by an earlier call)
-  async save({ outcome, players, rulesVersion, routes, notation, startedAt }: DraughtsResult): Promise<boolean> {
+  async save({ outcome, players, rulesVersion, routes, notation, startedAt, series }: DraughtsResult): Promise<boolean> {
     const existing = await this.prisma.game.findUnique({ where: { id: outcome.gameId }, select: { id: true } });
     if (existing) return true;
     const white = players.find(p => p.color === 'white');
@@ -40,6 +40,7 @@ export class DraughtsResults {
             notation,
             routes,
             ...(outcome.reason === 'forfeit' ? { forfeit: true } : {}),
+            ...(series ? { series } : {}),
           },
           startedAt: new Date(startedAt),
           completedAt: new Date(outcome.finishedAt),

@@ -11,6 +11,7 @@ import type { Color, RuleResult } from './engine/types';
 import { DraughtsResults } from './draughts-results';
 import {
   DRAUGHTS_GAME_TYPE,
+  SERIES_STREAK,
   type DraughtsAck,
   type DraughtsErrorCode,
   type DraughtsOutcome,
@@ -324,6 +325,7 @@ export class DraughtsService implements OnModuleInit, OnModuleDestroy, TeamRoomG
       }),
       game: room.game ? publicView(room.game) : null,
       outcome: room.outcome,
+      series: room.series ? { ...structuredClone(room.series), target: SERIES_STREAK } : null,
       paused: room.status === 'playing' ? pauseView(room.paused, room.players) : null,
     };
   }
@@ -376,6 +378,10 @@ export class DraughtsService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     room.paused = null;
     room.processed = {};
     room.players.forEach(p => (p.isReady = false));
+    // A new match when none is running or the last one was decided
+    if (!room.series || room.series.winnerSeat !== null) {
+      room.series = { id: randomUUID(), games: 0, wins: [0, 0], draws: 0, streak: [0, 0], winnerSeat: null, forfeit: false };
+    }
     console.log(`Draughts game ${room.game.gameId} started in room ${room.id}`);
   }
 
@@ -394,7 +400,32 @@ export class DraughtsService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     room.status = 'finished';
     room.paused = null;
     room.outcome = this.outcomeOf(room);
+    this.scoreSeries(room);
     this.recordResult(room);
+  }
+
+  // Counts the finished game in the match: a win adds to the winner's run and ends the loser's, a
+  // draw changes neither, a forfeit decides the match
+  private scoreSeries(room: DraughtsRoom) {
+    const series = room.series;
+    const outcome = room.outcome;
+    if (!series || !outcome) return;
+    series.games += 1;
+    const winnerSeat = outcome.winner ? room.gamePlayers?.find(p => p.color === outcome.winner)?.seat : undefined;
+    if (winnerSeat === undefined) {
+      series.draws += 1;
+      return;
+    }
+    const loserSeat = winnerSeat === 0 ? 1 : 0;
+    series.wins[winnerSeat] += 1;
+    series.streak[winnerSeat] += 1;
+    series.streak[loserSeat] = 0;
+    if (outcome.reason === 'forfeit') {
+      series.winnerSeat = winnerSeat;
+      series.forfeit = true;
+    } else if (series.streak[winnerSeat] >= SERIES_STREAK) {
+      series.winnerSeat = winnerSeat;
+    }
   }
 
   // Leaving a started game (or staying away past the grace period) forfeits it once a move has
@@ -414,6 +445,9 @@ export class DraughtsService implements OnModuleInit, OnModuleDestroy, TeamRoomG
       }
     }
     room.players = room.players.filter(p => p !== player);
+    // A match is between these two players: whoever sits down next starts a new one. A match just
+    // decided (by this forfeit or earlier) stays on show for the player who remains.
+    if (room.series && room.series.winnerSeat === null) room.series = null;
     if (lost) this.emitter?.toSocket(player.socketId, 'draughts:seatLost', { roomId: room.id });
     this.emitter?.leave(player.socketId, room.id);
     this.seatListener?.unseated(player.socketId);
@@ -442,6 +476,17 @@ export class DraughtsService implements OnModuleInit, OnModuleDestroy, TeamRoomG
       routes: game.moves.map(m => ({ from: m.from, path: [...m.path] })),
       notation: game.moves.map(m => m.notation),
       startedAt: room.gameStartedAt,
+      ...(room.series
+        ? {
+            series: {
+              id: room.series.id,
+              game: room.series.games,
+              streak: [...room.series.streak] as [number, number],
+              winnerColor: room.series.winnerSeat === null ? null : (room.gamePlayers.find(p => p.seat === room.series!.winnerSeat)?.color ?? null),
+              decided: room.series.winnerSeat !== null,
+            },
+          }
+        : {}),
     });
     this.rooms.save(room);
     this.flushResults(room);

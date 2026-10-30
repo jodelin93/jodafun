@@ -11,6 +11,7 @@ const SECTIONS = [
   ['rulesCaptureTitle', ['rulesCapture1', 'rulesCapture2', 'rulesCapture3', 'rulesCapture4', 'rulesCapture5']],
   ['rulesWinTitle', ['rulesWin1', 'rulesWin2', 'rulesWin3']],
   ['rulesDrawTitle', ['rulesDrawAgreement', 'rulesDraw61', 'rulesDraw62', 'rulesDraw63', 'rulesDrawDiagonal', 'rulesDraw64', 'rulesDrawWinFirst']],
+  ['rulesMatchTitle', ['rulesMatch']],
   ['rulesOnlineTitle', ['rulesOnline1', 'rulesOnline2', 'rulesOnline3']],
 ] as const;
 

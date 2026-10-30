@@ -683,3 +683,75 @@ describe('Draughts and other games', () => {
     expect(dropped.players).toHaveLength(2);
   });
 });
+
+describe('Draughts match: four wins in a row', () => {
+  // Ends the current game: `winnerSocket` wins (the other resigns), or a draw by agreement
+  async function finishGame(service: DraughtsService, store: RoomStore, roomId: string, winnerSocket: string | 'draw') {
+    const room = roomOf(store, roomId);
+    const version = () => roomOf(store, roomId).game!.version;
+    if (winnerSocket === 'draw') {
+      ok(await service.offerDraw(sock(0), { roomId, version: version(), requestId: requestId() }));
+      const offer = roomOf(store, roomId).game!.drawOffer!;
+      ok(await service.respondDraw(sock(1), { roomId, version: version(), requestId: requestId(), offerVersion: offer.version, accept: true }));
+    } else {
+      const loser = room.players.find(p => p.socketId !== winnerSocket)!.socketId;
+      ok(await service.resign(loser, { roomId, version: version(), requestId: requestId() }));
+    }
+  }
+  async function nextGame(service: DraughtsService, roomId: string) {
+    ok(await service.rematch(sock(0), { roomId }));
+    ok(await service.ready(sock(0), { roomId, ready: true }));
+    ok(await service.ready(sock(1), { roomId, ready: true }));
+  }
+
+  it('is won by the first player with 4 wins in a row; a draw does not break the run', async () => {
+    const { service, store, emitter } = setup();
+    const roomId = await startedRoom(service);
+    const seriesId = roomOf(store, roomId).series!.id;
+    const results: (string | 'draw')[] = [sock(0), sock(0), sock(0), 'draw', sock(0)];
+    for (let i = 0; i < results.length; i++) {
+      await finishGame(service, store, roomId, results[i]!);
+      const series = roomOf(store, roomId).series!;
+      expect(series.id).toBe(seriesId);
+      if (i < results.length - 1) {
+        expect(series.winnerSeat).toBeNull();
+        await nextGame(service, roomId);
+      }
+    }
+    const series = roomOf(store, roomId).series!;
+    expect(series).toEqual(expect.objectContaining({ games: 5, wins: [4, 0], draws: 1, streak: [4, 0], winnerSeat: 0, forfeit: false }));
+    expect(emitter.room.get(roomId)!.series).toEqual(expect.objectContaining({ winnerSeat: 0, target: 4 }));
+
+    // The next game starts a new match
+    await nextGame(service, roomId);
+    expect(roomOf(store, roomId).series).toEqual(expect.objectContaining({ games: 0, streak: [0, 0], winnerSeat: null }));
+    expect(roomOf(store, roomId).series!.id).not.toBe(seriesId);
+  });
+
+  it('puts the loser’s run back to 0 when they lose a game', async () => {
+    const { service, store } = setup();
+    const roomId = await startedRoom(service);
+    for (const winner of [sock(0), sock(0), sock(0)]) {
+      await finishGame(service, store, roomId, winner);
+      await nextGame(service, roomId);
+    }
+    await finishGame(service, store, roomId, sock(1));
+    expect(roomOf(store, roomId).series).toEqual(expect.objectContaining({ wins: [3, 1], streak: [0, 1], winnerSeat: null }));
+  });
+
+  it('gives the match to the other player when someone leaves mid-game', async () => {
+    const { service, store } = setup();
+    const roomId = await startedRoom(service);
+    ok(await playOne(service, store, roomId));
+    ok(await service.leave(sock(1), { roomId }));
+    expect(roomOf(store, roomId).series).toEqual(expect.objectContaining({ winnerSeat: 0, forfeit: true }));
+  });
+
+  it('records the match with every saved game', async () => {
+    const { service, store, results } = setup();
+    const roomId = await startedRoom(service);
+    await finishGame(service, store, roomId, sock(1));
+    await flush();
+    expect(results.saved[0]!.series).toEqual(expect.objectContaining({ game: 1, streak: [0, 1], decided: false, winnerColor: null }));
+  });
+});

@@ -173,3 +173,19 @@ games, `cursor` = the last row's `id`, `nextCursor` in the answer):
 { items: [{ id, result: 'win' | 'loss' | 'draw', color: 'white' | 'black', opponent: { name } | null,
             reason, moves, rulesVersion, finishedAt, forfeit }], nextCursor }
 ```
+
+## The match: four wins in a row
+
+A room plays a **match**, a series of games (`room.series`, `SERIES_STREAK = 4` in
+`draughts.types.ts`). Each player has a run of consecutive wins:
+
+- a win adds 1 to the winner's run and puts the loser's run back to 0;
+- a draw (by agreement or by art. 6) leaves both runs unchanged;
+- the first player whose run reaches 4 wins the match;
+- leaving or staying away past the grace period during a game forfeits that game **and the match**;
+  leaving between games ends an undecided match (the next player starts a new one).
+
+Colours swap every game. After a game, "Next game" (`draughts:rematch`) returns to the lobby for the
+next game of the same match; once a match is decided, the same action starts a new match with a new
+id. Every saved game records its match in `games.settings.series`
+(`{ id, game, streak, winnerColor, decided }`). Statistics stay per game.

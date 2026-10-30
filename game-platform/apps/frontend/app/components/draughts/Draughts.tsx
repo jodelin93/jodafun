@@ -8,6 +8,7 @@ import SiteHeader from '../ui/SiteHeader';
 import SiteFooter from '../ui/SiteFooter';
 import Loading from '../ui/Loading';
 import TableMenu from '../ui/TableMenu';
+import MatchStatus from './MatchStatus';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import { clearCurrentRoom, roomPath, saveCurrentRoom } from '../../lib/currentRoom';
@@ -286,6 +287,9 @@ export default function Draughts() {
         {room.outcome?.reason === 'forfeit' && (
           <p className="mb-4 rounded-2xl bg-felt-deep p-3 text-sm ring-1 ring-inset ring-gold/40">{t('forfeitNotice')}</p>
         )}
+        {room.series && room.series.games > 0 && room.series.winnerSeat === null && (
+          <MatchStatus tx={tx} series={room.series} seats={room.seats} mySeat={mySeat.seat} />
+        )}
         <DraughtsLobby room={room} myPlayerId={playerId} socket={socket} onAction={draughts.roomAction} onLeave={leave} errorText={errorText} />
       </>
     );
@@ -299,6 +303,9 @@ export default function Draughts() {
         myColor={mySeat.color}
         opponentName={opponentName}
         view={game}
+        series={room.series}
+        seats={room.seats}
+        mySeat={mySeat.seat}
         onRematch={() => {
           void draughts.roomAction('draughts:rematch').then(ack => !ack.ok && setError(errorText(ack.code)));
         }}
@@ -320,6 +327,7 @@ export default function Draughts() {
           rules={close => <DraughtsRules onBack={close} />}
           errorText={errorText}
         />
+        {room.series && <MatchStatus tx={tx} series={room.series} seats={room.seats} mySeat={mySeat.seat} />}
         <DraughtsTable
           tx={tx}
           view={game}

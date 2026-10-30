@@ -25,6 +25,21 @@ export interface DraughtsOutcome {
   finishedAt: number;
 }
 
+// A match is a series of games: whoever wins SERIES_STREAK games in a row wins it. A draw leaves
+// both runs as they are; a loss puts the loser's run back to 0. Leaving or staying away forfeits
+// the whole match.
+export const SERIES_STREAK = 4;
+
+export interface DraughtsSeries {
+  id: string;
+  games: number;
+  wins: [number, number]; // by seat
+  draws: number;
+  streak: [number, number]; // consecutive wins by seat
+  winnerSeat: 0 | 1 | null; // set when the match is decided
+  forfeit: boolean;
+}
+
 // The players a game started with and their colours, kept for results even if someone leaves
 export interface DraughtsGamePlayer {
   id: string;
@@ -42,6 +57,8 @@ export interface DraughtsResult {
   routes: { from: Square; path: Square[] }[]; // every accepted move, replayable
   notation: string[];
   startedAt: number;
+  // The match this game belongs to, as it stood after the game
+  series?: { id: string; game: number; streak: [number, number]; winnerColor: Color | null; decided: boolean };
 }
 
 export interface ProcessedRequest {
@@ -62,6 +79,7 @@ export interface DraughtsRoom {
   gameStartedAt: number | null;
   gamePlayers: DraughtsGamePlayer[] | null;
   outcome: DraughtsOutcome | null;
+  series?: DraughtsSeries | null; // missing on rooms saved before matches existed
   paused?: RoomPause | null;
   pendingResults: DraughtsResult[];
   processed: Record<string, ProcessedRequest[]>; // by player id
@@ -81,7 +99,8 @@ export interface DraughtsRoom {
 //   draughts:offerDraw     { roomId, version, requestId }                     → { version }
 //   draughts:respondDraw   { roomId, version, requestId, offerVersion, accept } → { version }
 //   draughts:pause         { roomId }   draughts:resume { roomId }            (as in the other team games)
-//   draughts:rematch       { roomId }   (after a finished game: back to the lobby, colours swapped next game)
+//   draughts:rematch       { roomId }   (after a finished game: back to the lobby for the next game of the
+//                                       match, or a new match once one is decided; colours swap every game)
 //   draughts:leave         { roomId }
 //   draughts:tutorial      { step }                                           → { step: { id, index, total, view } }
 //   draughts:tutorialCheck { step, route: { from, path } }                    → TutorialCheck
@@ -134,5 +153,6 @@ export interface DraughtsRoomView {
   seats: PublicDraughtsSeat[];
   game: PublicDraughtsView | null;
   outcome: DraughtsOutcome | null;
+  series: (DraughtsSeries & { target: number }) | null;
   paused: PauseView | null;
 }
