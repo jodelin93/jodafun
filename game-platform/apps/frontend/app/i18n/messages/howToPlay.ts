@@ -59,7 +59,7 @@ export const howToPlayMessages = defineMessages({
 
     tipsTitle: 'Tips',
     tip1: 'Work through the board in order: start from a corner, or go row by row, instead of flipping at random.',
-    tip2: 'Say each picture in your head with its place, like "beach, top left". Words stick better than pictures alone.',
+    tip2: 'Say each picture in your head with its place, like "fox, top left". Words stick better than pictures alone.',
     tip3: 'When the other player\'s cards are shown, watch their flips. Every card they turn over tells you where a picture is.',
     tip4: 'When you turn over a picture you have seen before, go straight for its twin.',
   },
@@ -119,7 +119,7 @@ export const howToPlayMessages = defineMessages({
 
     tipsTitle: 'Astuces',
     tip1: 'Parcourez le plateau dans l’ordre : partez d’un coin ou avancez ligne par ligne, au lieu de retourner des cartes au hasard.',
-    tip2: 'Nommez chaque image dans votre tête avec sa place, par exemple « plage, en haut à gauche ». Les mots se retiennent mieux que les images seules.',
+    tip2: 'Nommez chaque image dans votre tête avec sa place, par exemple « renard, en haut à gauche ». Les mots se retiennent mieux que les images seules.',
     tip3: 'Quand les cartes de l’autre joueur sont visibles, regardez ce qu’il retourne. Chaque carte révélée vous indique où se trouve une image.',
     tip4: 'Quand vous retournez une image déjà vue, allez droit sur sa jumelle.',
   },
@@ -179,7 +179,7 @@ export const howToPlayMessages = defineMessages({
 
     tipsTitle: 'Konsèy',
     tip1: 'Travay tab la nan lòd: kòmanse nan yon kwen, oswa ale ranje pa ranje, olye w vire kat o aza.',
-    tip2: 'Di chak imaj nan tèt ou ak kote li ye, tankou "plaj, anlè agoch". Mo yo rete nan tèt pi byen pase imaj sèlman.',
+    tip2: 'Di chak imaj nan tèt ou ak kote li ye, tankou "rena, anlè agoch". Mo yo rete nan tèt pi byen pase imaj sèlman.',
     tip3: 'Lè kat lòt jwè a parèt, gade sa l ap vire. Chak kat li vire montre w kote yon imaj ye.',
     tip4: 'Lè w vire yon imaj ou te deja wè, ale dirèk sou marasa li.',
   },
@@ -239,7 +239,7 @@ export const howToPlayMessages = defineMessages({
 
     tipsTitle: 'Consejos',
     tip1: 'Recorre el tablero en orden: empieza por una esquina o ve fila por fila, en lugar de voltear al azar.',
-    tip2: 'Nombra cada imagen en tu cabeza junto con su lugar, como "playa, arriba a la izquierda". Las palabras se recuerdan mejor que las imágenes solas.',
+    tip2: 'Nombra cada imagen en tu cabeza junto con su lugar, como "zorro, arriba a la izquierda". Las palabras se recuerdan mejor que las imágenes solas.',
     tip3: 'Cuando las cartas del otro jugador se muestran, mira lo que voltea. Cada carta que descubre te dice dónde está una imagen.',
     tip4: 'Cuando voltees una imagen que ya viste, ve directo por su pareja.',
   },
