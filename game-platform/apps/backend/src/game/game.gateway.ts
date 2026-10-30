@@ -1113,11 +1113,28 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   @SubscribeMessage('presence:list')
   async handlePresenceList(@ConnectedSocket() client: Socket) {
     const userId = await this.getSocketUserId(client.id);
-    const players = this.listedPlayers()
-      .filter(e => e.socketId !== client.id && !(userId && e.userId === userId))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, PRESENCE_LIST_MAX)
-      .map(e => ({ id: e.socketId, name: e.name, isGuest: e.isGuest, since: e.since }));
+    const notMe = (socketId: string, entryUserId: string | null) => socketId !== client.id && !(userId && entryUserId === userId);
+    // Available: can receive a request now
+    const available = this.listedPlayers()
+      .filter(e => notMe(e.socketId, e.userId))
+      .map(e => ({ id: e.socketId, name: e.name, isGuest: e.isGuest, since: e.since, status: 'available' as const }));
+    // Playing: seated and connected in some game's room. Shown so people know who is around; they
+    // can't receive a request until they leave. Only the game is told, never the room code.
+    const shown = new Set(available.map(p => p.id));
+    const accounts = new Set(this.listedPlayers().map(e => e.userId).filter(Boolean));
+    const playing: { id: string; name: string; isGuest: boolean; since: number; status: 'playing'; game: string }[] = [];
+    for (const room of this.rooms.allRooms()) {
+      for (const p of room.players) {
+        if (!p.connected || !this.server.sockets.sockets.get(p.socketId)?.connected) continue;
+        if (!notMe(p.socketId, p.userId ?? null) || shown.has(p.socketId)) continue;
+        if (p.userId && accounts.has(p.userId)) continue;
+        shown.add(p.socketId);
+        if (p.userId) accounts.add(p.userId);
+        // Whether a seated player is a guest isn't known here: no guest chip rather than a wrong one
+        playing.push({ id: p.socketId, name: p.name, isGuest: false, since: room.updatedAt, status: 'playing', game: room.gameType ?? 'joda-memory' });
+      }
+    }
+    const players = [...available.sort((a, b) => a.name.localeCompare(b.name)), ...playing.sort((a, b) => a.name.localeCompare(b.name))].slice(0, PRESENCE_LIST_MAX);
     return { players };
   }
 

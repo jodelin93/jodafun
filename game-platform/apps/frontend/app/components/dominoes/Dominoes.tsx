@@ -7,6 +7,7 @@ import { BookOpen, Dices, GraduationCap, Swords } from 'lucide-react';
 import SiteHeader from '../ui/SiteHeader';
 import SiteFooter from '../ui/SiteFooter';
 import GameChat from '../ui/GameChat';
+import OnlineInvites from '../ui/OnlineInvites';
 import Loading from '../ui/Loading';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuestPlay } from '../../lib/useGuestPlay';
@@ -180,13 +181,17 @@ export default function Dominoes() {
     });
   };
 
-  const create = async () => {
+  const create = async (): Promise<string | null> => {
     setBusy(true);
     setError(null);
     const ack = await dominoes.create(name.trim(), mode, target);
     setBusy(false);
-    if (ack.ok) setUrlRoom(ack.roomId);
-    else setError(errorText(ack.code));
+    if (ack.ok) {
+      setUrlRoom(ack.roomId);
+      return ack.roomId;
+    }
+    setError(errorText(ack.code));
+    return null;
   };
 
   const join = async (roomId: string) => {
@@ -414,6 +419,11 @@ export default function Dominoes() {
                 </button>
               </div>
             </section>
+          </div>
+        )}
+        {!linkRoom && (
+          <div className="max-w-3xl">
+            <OnlineInvites socket={socket} game="dominoes" roomId={null} onNeedRoom={create} />
           </div>
         )}
       </div>

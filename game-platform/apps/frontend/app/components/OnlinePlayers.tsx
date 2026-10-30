@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import type { Socket } from 'socket.io-client';
-import { ArrowLeft, Clock, Users, X } from 'lucide-react';
+import { ArrowLeft, Clock, Gamepad2, Users, X } from 'lucide-react';
 import { useT } from '../i18n/I18nProvider';
 import { gameMessages } from '../i18n/messages/game';
+import { onlineMessages } from '../i18n/messages/online';
+import { useGameTitle } from '../lib/useGameTitle';
 import { alternateMessages } from '../i18n/messages/alternate';
 
-export type OnlinePlayer = { id: string; name: string; isGuest: boolean; since: number };
+export type OnlinePlayer = { id: string; name: string; isGuest: boolean; since: number; status?: 'available' | 'playing'; game?: string };
 
 // The room the server creates when a request is accepted (same shape as a rejoin answer's room)
 export type InviteRoom = {
@@ -36,6 +38,8 @@ type Props = {
 
 // Lists players who have Joda Memory open and aren't in a room, and sends them game requests
 export default function OnlinePlayers({ socket, name, onNameChange, playerKey, difficulty, onBack, onRoomReady }: Props) {
+  const online = useT(onlineMessages);
+  const { title: gameTitle } = useGameTitle();
   const t = useT(gameMessages);
   const ta = useT(alternateMessages);
   const [players, setPlayers] = useState<OnlinePlayer[] | null>(null);
@@ -251,14 +255,22 @@ export default function OnlinePlayers({ socket, name, onNameChange, playerKey, d
                 <p className="truncate font-semibold">{player.name}</p>
                 {player.isGuest && <span className="chip mt-1 px-2 py-0.5 text-xs">{t('guest')}</span>}
               </div>
-              <button
-                type="button"
-                onClick={() => sendRequest(player)}
-                disabled={outgoing?.status === 'waiting'}
-                className="btn-gold btn-sm min-h-11 shrink-0"
-              >
-                {t('requestGame')}
-              </button>
+              {player.status === 'playing' ? (
+                // Already in a room: shown so people know who is around, but can't be asked yet
+                <span className="flex shrink-0 items-center gap-1 text-xs text-chalk" title={online('playingHint')}>
+                  <Gamepad2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {online('playing', { game: player.game ? gameTitle(player.game) : '' })}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => sendRequest(player)}
+                  disabled={outgoing?.status === 'waiting'}
+                  className="btn-gold btn-sm min-h-11 shrink-0"
+                >
+                  {t('requestGame')}
+                </button>
+              )}
             </li>
           ))}
         </ul>

@@ -94,9 +94,16 @@ describe('Invitations into Dominoes rooms', () => {
       ['t1', 1, 'Tt1'],
     ]);
 
-    // Seated players are not listed as available
-    const listed = (await gateway.handlePresenceList(targets[3])).players.map(p => p.id);
-    expect(listed).toEqual(['t2', 't3']);
+    // Seated players are not listed as available, but are shown as playing (the game only, no room code)
+    const players = (await gateway.handlePresenceList(targets[3])).players;
+    expect(players.filter(p => p.status === 'available').map(p => p.id)).toEqual(['t2', 't3']);
+    expect(players.filter(p => p.status === 'playing').map(p => [p.id, 'game' in p ? p.game : null])).toEqual([
+      ['s0', 'dominoes'],
+      ['t1', 'dominoes'],
+    ]);
+    expect(JSON.stringify(players)).not.toContain(roomId);
+    // A playing person can't be sent a request
+    expect((await gateway.handleInviteSend({ toId: 't1', playerKey: 'browser-key-t4', game: 'dominoes', roomId }, targets[3])).success).toBe(false);
 
     // Leaving the seat withdraws the inviter's other Dominoes requests
     await dominoes.leave('s0', { roomId });

@@ -7,6 +7,7 @@ import { BookOpen, Grid3x3, GraduationCap, Swords } from 'lucide-react';
 import SiteHeader from '../ui/SiteHeader';
 import SiteFooter from '../ui/SiteFooter';
 import GameChat from '../ui/GameChat';
+import OnlineInvites from '../ui/OnlineInvites';
 import Loading from '../ui/Loading';
 import TableMenu from '../ui/TableMenu';
 import { useAuth } from '../../contexts/AuthContext';
@@ -186,13 +187,17 @@ export default function FiveInARow() {
     });
   };
 
-  const create = async () => {
+  const create = async (): Promise<string | null> => {
     setBusy(true);
     setError(null);
     const ack = await five.create(name.trim());
     setBusy(false);
-    if (ack.ok) setUrlRoom(ack.roomId);
-    else setError(errorText(ack.code));
+    if (ack.ok) {
+      setUrlRoom(ack.roomId);
+      return ack.roomId;
+    }
+    setError(errorText(ack.code));
+    return null;
   };
 
   const join = async (roomId: string) => {
@@ -413,6 +418,11 @@ export default function FiveInARow() {
                 {t('tutorial')}
               </button>
             </div>
+          </div>
+        )}
+        {!linkRoom && (
+          <div className="max-w-3xl">
+            <OnlineInvites socket={socket} game="five-in-a-row" roomId={null} onNeedRoom={create} />
           </div>
         )}
       </div>

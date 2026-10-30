@@ -7,6 +7,7 @@ import { BookOpen, CircleDot, GraduationCap, Swords } from 'lucide-react';
 import SiteHeader from '../ui/SiteHeader';
 import SiteFooter from '../ui/SiteFooter';
 import GameChat from '../ui/GameChat';
+import OnlineInvites from '../ui/OnlineInvites';
 import Loading from '../ui/Loading';
 import TableMenu from '../ui/TableMenu';
 import MatchStatus from './MatchStatus';
@@ -191,13 +192,17 @@ export default function Draughts() {
     });
   };
 
-  const create = async () => {
+  const create = async (): Promise<string | null> => {
     setBusy(true);
     setError(null);
     const ack = await draughts.create(name.trim());
     setBusy(false);
-    if (ack.ok) setUrlRoom(ack.roomId);
-    else setError(errorText(ack.code));
+    if (ack.ok) {
+      setUrlRoom(ack.roomId);
+      return ack.roomId;
+    }
+    setError(errorText(ack.code));
+    return null;
   };
 
   const join = async (roomId: string) => {
@@ -425,6 +430,11 @@ export default function Draughts() {
                 {t('tutorial')}
               </button>
             </div>
+          </div>
+        )}
+        {!linkRoom && (
+          <div className="max-w-3xl">
+            <OnlineInvites socket={socket} game="international-draughts" roomId={null} onNeedRoom={create} />
           </div>
         )}
       </div>

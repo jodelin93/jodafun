@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import OnlineInvites from '../ui/OnlineInvites';
 import type { Socket } from 'socket.io-client';
-import { Check, Copy, Crown, LogOut, Users } from 'lucide-react';
+import { Check, Copy, Crown, LogOut } from 'lucide-react';
 import ShareRoomButton from '../ShareRoomButton';
 import { countdown } from '../../lib/draughts/describe';
 import type { DraughtsAck, DraughtsRoomView, PublicDraughtsSeat } from '../../lib/draughts/types';
-import { getPlayerKey } from '../../lib/playerKey';
 import { useT } from '../../i18n/I18nProvider';
 import { draughtsMessages } from '../../i18n/messages/draughts';
 
@@ -129,78 +129,7 @@ export default function DraughtsLobby({ room, myPlayerId, socket, onAction, onLe
         </div>
       </div>
 
-      {missing > 0 && <OnlineInvites socket={socket} roomId={room.id} />}
+      {missing > 0 && <OnlineInvites socket={socket} game="international-draughts" roomId={room.id} />}
     </div>
-  );
-}
-
-type Online = { id: string; name: string; isGuest: boolean };
-type Sent = Record<string, { inviteId: string; status: 'waiting' | 'declined' | 'expired' | 'failed' }>;
-
-// People online and not in a room; a request asks them into this room's free seat
-function OnlineInvites({ socket, roomId }: { socket: Socket; roomId: string }) {
-  const t = useT(draughtsMessages);
-  const [players, setPlayers] = useState<Online[] | null>(null);
-  const [sent, setSent] = useState<Sent>({});
-
-  useEffect(() => {
-    const load = () => socket.emit('presence:list', {}, (res: { players?: Online[] }) => setPlayers(res?.players ?? []));
-    load();
-    const timer = setInterval(load, 15000);
-    socket.on('presence:changed', load);
-    const update = (status: 'declined' | 'expired') => (d: { inviteId: string }) =>
-      setSent(s => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v.inviteId === d.inviteId ? { ...v, status } : v])));
-    const declined = update('declined');
-    const expired = update('expired');
-    socket.on('invite:declined', declined);
-    socket.on('invite:expired', expired);
-    return () => {
-      clearInterval(timer);
-      socket.off('presence:changed', load);
-      socket.off('invite:declined', declined);
-      socket.off('invite:expired', expired);
-    };
-  }, [socket]);
-
-  const invite = (player: Online) =>
-    socket.emit(
-      'invite:send',
-      { toId: player.id, playerKey: getPlayerKey(), game: 'international-draughts', roomId },
-      (res: { success: boolean; inviteId?: string }) =>
-        setSent(s => ({ ...s, [player.id]: { inviteId: res?.inviteId ?? '', status: res?.success ? 'waiting' : 'failed' } })),
-    );
-
-  return (
-    <section aria-labelledby="online-title" className="panel p-4">
-      <h2 id="online-title" className="title-md flex items-center gap-2">
-        <Users className="h-5 w-5 text-gold" aria-hidden="true" />
-        {t('inviteOnline')}
-      </h2>
-      {players && players.length === 0 && <p className="mt-2 text-sm text-chalk">{t('nobodyOnline')}</p>}
-      {players && players.length > 0 && (
-        <ul className="mt-3 divide-y divide-table-rim">
-          {players.map(p => {
-            const status = sent[p.id]?.status;
-            return (
-              <li key={p.id} className="flex items-center justify-between gap-3 py-2">
-                <span className="min-w-0 truncate font-semibold">{p.name}</span>
-                <span className="flex shrink-0 items-center gap-2 text-sm text-chalk">
-                  {status === 'declined' && t('inviteDeclined', { name: p.name })}
-                  {status === 'expired' && t('inviteExpired', { name: p.name })}
-                  {status === 'failed' && t('inviteFailed')}
-                  {status === 'waiting' ? (
-                    <span>{t('invited')}</span>
-                  ) : (
-                    <button type="button" onClick={() => invite(p)} className="btn-gold btn-sm min-h-11">
-                      {t('invite')}
-                    </button>
-                  )}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
   );
 }
