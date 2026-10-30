@@ -97,7 +97,11 @@ export default function CasinoTable({ match, mine, seats, capacity, onPreview, o
 
   const addStep = (kind: StepKind, base?: string) => {
     setNotice(null);
-    const result = makeStep(kind, sel, base ?? null);
+    // "Add" with just a hand card on the opponents' single build raises its value, as "Change value" does
+    const target = allBuilds.find(b => b.id === sel.build);
+    const raises =
+      kind === 'add' && !!sel.hand && !!target && opponentSingleIds.has(target.id) && sel.loose.length === 0 && !sel.pile && target.value + rankOf(sel.hand) <= 14;
+    const result = makeStep(raises ? 'change' : kind, sel, base ?? null);
     if ('problem' in result) {
       if (result.problem === 'needBase') setAskingBase(true);
       else if (result.problem === 'noSets' && sel.hand) {
