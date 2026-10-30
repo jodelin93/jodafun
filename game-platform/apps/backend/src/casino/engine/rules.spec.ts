@@ -19,19 +19,19 @@ describe('cards and deal', () => {
     expect(DECK.find(c => c.id === 'QH')?.rank).toBe(12);
   });
 
-  it('deals four players 12 cards each with four on the table', () => {
+  it('deals four players 4 cards each with four on the table', () => {
     const state = createMatch({ players: 4 }, seededRandom(1), 2);
-    expect(state.hands.map(h => h.length)).toEqual([12, 12, 12, 12]);
+    expect(state.hands.map(h => h.length)).toEqual([4, 4, 4, 4]);
     expect(state.loose).toHaveLength(4);
-    expect(state.stock).toHaveLength(0);
+    expect(state.stock).toHaveLength(32);
     expect(state.turn).toBe(3); // the player on the dealer's right plays first
     assertValidState(state);
   });
 
-  it('deals two players 12 each and keeps 24 for the second deal', () => {
+  it('deals two players 4 each and keeps 40 for later deals', () => {
     const state = createMatch({ players: 2 }, seededRandom(2), 0);
-    expect(state.hands.map(h => h.length)).toEqual([12, 12]);
-    expect(state.stock).toHaveLength(24);
+    expect(state.hands.map(h => h.length)).toEqual([4, 4]);
+    expect(state.stock).toHaveLength(40);
     expect(state.turn).toBe(1);
     assertValidState(state);
   });
@@ -306,13 +306,31 @@ describe('two-player first deal', () => {
     expect(turn(state, 0, { type: 'augment', build: 'b1', loose: ['9S', '4D'] }, { type: 'discard', card: '3C' }).ok).toBe(true);
   });
 
-  it('deals the second twelve onto the same layout when both hands are empty', () => {
+  it('deals four more each onto the same layout when both hands are empty', () => {
+    const stock = DECK.map(c => c.id).filter(id => !['2C', '3D', '9S', 'KH'].includes(id)).slice(0, 32);
+    const state = scenario({ turn: 1, hands: [[], ['2C']], loose: ['9S', 'KH'], stock });
+    const next = ok(turn(state, 1, { type: 'discard', card: '2C' }));
+    expect(next.deal).toBe(0); // each has had 12 cards so far: the first-twelve limits still apply
+    expect(next.hands.map(h => h.length)).toEqual([4, 4]);
+    expect(next.stock).toHaveLength(24);
+    expect(next.loose).toEqual(['9S', 'KH', '2C']);
+    expect(next.turn).toBe(0);
+  });
+
+  it('lifts the first-twelve limits with the fourth deal of two players', () => {
     const stock = DECK.map(c => c.id).filter(id => !['2C', '3D', '9S', 'KH'].includes(id)).slice(0, 24);
     const state = scenario({ turn: 1, hands: [[], ['2C']], loose: ['9S', 'KH'], stock });
     const next = ok(turn(state, 1, { type: 'discard', card: '2C' }));
     expect(next.deal).toBe(1);
-    expect(next.hands.map(h => h.length)).toEqual([12, 12]);
-    expect(next.loose).toEqual(['9S', 'KH', '2C']);
+    expect(next.hands.map(h => h.length)).toEqual([4, 4]);
+  });
+
+  it('deals four players four more each until the deck is used', () => {
+    const stock = DECK.map(c => c.id).filter(id => !['2C', '3D', '9S', 'KH'].includes(id)).slice(0, 16);
+    const state = scenario({ players: 4, turn: 3, hands: [[], [], [], ['2C']], loose: ['9S', 'KH'], stock });
+    const next = ok(turn(state, 3, { type: 'discard', card: '2C' }));
+    expect(next.hands.map(h => h.length)).toEqual([4, 4, 4, 4]);
+    expect(next.stock).toHaveLength(0);
     expect(next.turn).toBe(0);
   });
 });

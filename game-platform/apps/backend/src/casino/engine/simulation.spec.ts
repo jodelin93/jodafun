@@ -32,9 +32,8 @@ function simulate(players: PlayerCount, seed: number, target = 21) {
       // 11 points a hand, unless nobody ever captured (then the table cards go unscored)
       if (result.handResult.lastCapturer !== null) expect(points).toBe(11);
     } else {
-      // Exactly one card left the hands (a second two-player deal refills them by 24)
-      const drop = cardsInHands(before) - cardsInHands(state);
-      expect(drop === 1 || (players === 2 && state.deal === 1 && before.deal === 0)).toBe(true);
+      // Exactly one card left the hands and stock together (a new deal only moves stock to hands)
+      expect(cardsInHands(before) - cardsInHands(state)).toBe(1);
     }
     // Hidden cards never reach the public view (a previous hand's last turn names reshuffled cards)
     const pub = publicView(state);

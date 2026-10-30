@@ -23,8 +23,10 @@ Seats, deal and turn order
 - The first dealer is random. The player on the dealer's right (dealer + 1) cuts four cards from
   the middle of the shuffled deck face up as the layout and plays first; the dealer plays last.
   After each hand the deal passes to the right (dealer + 1).
-- Four players: 12 cards each. Two players: 12 each, and when both hands are empty another 12 each
-  from the rest of the deck; the layout stays as it is between the two deals.
+- House choice: everyone is dealt 4 cards at a time. When every hand is empty, 4 more each go onto
+  the same table from the rest of the deck, until it is used up: three deals with four players, six
+  with two. (The source deals 12 each, or 12 and then 12 more with two players; the cards played and
+  the scoring are the same, only the hands are smaller.)
 - House choice (the source "suggests" it): if the four layout cards are worth 3 or more points
   (10♦ = 2, 2♠ = 1, each ace = 1) or include three or more picture cards, they are shuffled back
   and the cut is repeated. On by default (`redealStrongLayout`).
@@ -73,7 +75,7 @@ Builds
 - Owners must keep a card that captures each build they own (with two aces needed for builds of
   1 and 14 at the same time). You can't use your last such card for anything else.
 
-Two-player game, first 12 cards each
+Two-player game, first 12 cards each (the first three deals of 4)
 - You can't discard without capturing while you own a build.
 - You may own at most one build at the end of your turn.
 

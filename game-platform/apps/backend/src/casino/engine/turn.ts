@@ -19,6 +19,8 @@ import type {
 
 // Limits on what a client may send; a real turn needs far fewer
 export const MAX_ACTIONS = 16;
+export const HAND_SIZE = 4; // cards dealt to each player at a time
+const FIRST_TWELVE = 12; // two players: the first-twelve limits last while each has had at most this many
 const MAX_LIST = 52;
 const BUILD_ID = /^b\d{1,6}$/;
 
@@ -530,9 +532,9 @@ function finishTurn(w: Work) {
     return;
   }
   if (s.stock.length > 0) {
-    // Two players: the second twelve each, onto the same layout
-    dealRound(s, s.stock.splice(0, players * 12));
-    s.deal = 1;
+    // Four more each, onto the same table
+    dealRound(s, s.stock.splice(0, players * HAND_SIZE));
+    if ((DECK.length - 4 - s.stock.length) / players > FIRST_TWELVE) s.deal = 1;
     s.turn = (w.seat + 1) % players;
     return;
   }

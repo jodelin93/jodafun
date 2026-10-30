@@ -1,6 +1,6 @@
 import { DECK, canCapture, captureValues, cardPoints, isAce, isCardId, isPicture, rankForValue, rankOf, shuffle, type RandomInt } from './cards';
 import { findAddableSet, findSetWithValue } from './sets';
-import { applyTurn, buildCards, dealRound, pileTop, positionAfter, teamOf } from './turn';
+import { HAND_SIZE, applyTurn, buildCards, dealRound, pileTop, positionAfter, teamOf } from './turn';
 import type { AceValue, Build, CasinoConfig, HandResult, LastTurn, MatchState, RuleError, Seat, TurnAction, TurnProposal } from './types';
 
 export const DEFAULT_TARGET_POINTS = 21;
@@ -75,8 +75,8 @@ export function dealHand(state: MatchState, random: RandomInt) {
   state.lastCapturer = null;
   state.proven = Array.from({ length: players }, () => []);
   state.holds = Array.from({ length: players }, () => []);
-  dealRound(state, deck.splice(0, players * 12));
-  state.stock = deck; // two players: the second twelve each; four players: empty
+  dealRound(state, deck.splice(0, players * HAND_SIZE));
+  state.stock = deck; // dealt four each at a time whenever every hand is empty
   state.turn = (state.dealer + 1) % players;
   state.status = 'playing';
   state.lastTurn = null;

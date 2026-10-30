@@ -65,9 +65,9 @@ export interface MatchState {
   dealer: Seat;
   turn: Seat;
   handNumber: number;
-  deal: 0 | 1; // two players: 0 while playing the first twelve cards, 1 for the second twelve
+  deal: 0 | 1; // two players: 0 until each has been dealt more than twelve cards, then 1
   hands: string[][]; // by seat
-  stock: string[]; // undealt cards (two players, until the second deal)
+  stock: string[]; // undealt cards, four each at a time
   loose: string[];
   builds: Build[];
   piles: string[][]; // by team, bottom to top

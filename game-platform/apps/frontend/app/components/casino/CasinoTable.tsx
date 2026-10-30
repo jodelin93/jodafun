@@ -184,6 +184,12 @@ export default function CasinoTable({ match, mine, seats, capacity, onPreview, o
             <br />
             {t('handN', { n: match.handNumber })}
             {capacity === 2 && <> · {match.deal === 0 ? t('firstTwelve') : t('secondTwelve')}</>}
+            {match.stockCount > 0 && (
+              <>
+                <br />
+                {t('toDeal', { n: match.stockCount })}
+              </>
+            )}
           </p>
         </div>
         <p role="status" className={`rounded-full px-3 py-1 text-sm font-semibold ${myTurn ? 'bg-gold text-ink' : 'bg-white/5'}`}>

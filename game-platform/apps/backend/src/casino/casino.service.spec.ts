@@ -87,7 +87,7 @@ describe('Casino rooms', () => {
     expect(room.status).toBe('playing');
 
     const view = emitter.room.get(roomId)!;
-    expect(view.match?.handCounts).toEqual([12, 12]);
+    expect(view.match?.handCounts).toEqual([4, 4]);
     const json = JSON.stringify(view);
     for (const id of room.match!.hands.flat()) expect(json).not.toContain(`"${id}"`);
     for (const secret of ['playerKey', 'socketId', 'userId', 'browser-key']) expect(json).not.toContain(secret);
@@ -105,7 +105,7 @@ describe('Casino rooms', () => {
     const view = emitter.room.get(roomId)!;
     expect(view.seats.map(s => s.team)).toEqual([0, 1, 0, 1]);
     expect(view.seats.every(s => s.player)).toBe(true);
-    expect(view.match?.handCounts).toEqual([12, 12, 12, 12]);
+    expect(view.match?.handCounts).toEqual([4, 4, 4, 4]);
   });
 
   it('refuses a full room, a started match and a second seat for the same account', async () => {
