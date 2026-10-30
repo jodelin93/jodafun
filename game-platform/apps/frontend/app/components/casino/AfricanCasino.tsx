@@ -162,7 +162,7 @@ export default function AfricanCasino() {
       if (res.game === 'african-casino' && res.roomId) {
         setUrlRoom(res.roomId);
         void casino.rejoin(res.roomId);
-      } else if ((res.game === 'dominoes' || res.game === 'international-draughts') && res.roomId) {
+      } else if ((res.game === 'dominoes' || res.game === 'international-draughts' || res.game === 'five-in-a-row') && res.roomId) {
         router.push(roomPath(res.roomId, res.game));
       } else if (res.room) {
         router.push(`/games/joda-memory?roomId=${res.room.id}`);
@@ -449,8 +449,8 @@ export default function AfricanCasino() {
                 ? t('inviteCasino', { name: invite.fromName, n: invite.capacity ?? 2 })
                 : invite.game === 'dominoes'
                   ? t(invite.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: invite.fromName })
-                  : invite.game === 'international-draughts'
-                    ? t('inviteDraughts', { name: invite.fromName, game: gameTitle('international-draughts') })
+                  : invite.game === 'international-draughts' || invite.game === 'five-in-a-row'
+                    ? t('inviteDraughts', { name: invite.fromName, game: gameTitle(invite.game) })
                     : t('inviteMemory', { name: invite.fromName })}{' '}
               {t('expiresIn', { seconds: Math.max(0, Math.ceil((invite.expiresAt - now) / 1000)) })}
             </p>

@@ -108,6 +108,7 @@ model Game {
   rounds       GameRound[]
   matchHistory MatchHistory[]
   participants GameParticipant[]
+  moves        GameMove[]
   hands        GameHand[]
 
   @@index([roomCode])
@@ -240,4 +241,22 @@ model GameHand {
 
   @@unique([gameId, handNumber])
   @@map("game_hands")
+}
+
+// The moves of a game kept one row per move (Infinite five-in-a-row). Coordinates are canonical
+// decimal strings of any size; a move number and a cell can each appear only once per game.
+model GameMove {
+  id     String @id @default(uuid())
+  gameId String @map("game_id")
+  ply    Int
+  symbol String @db.VarChar(1)
+  x      String @db.VarChar(401)
+  y      String @db.VarChar(401)
+
+  // Relations
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, ply])
+  @@unique([gameId, x, y])
+  @@map("game_moves")
 }

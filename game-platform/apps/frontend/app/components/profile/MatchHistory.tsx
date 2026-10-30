@@ -10,17 +10,19 @@ import {
   fetchMyCasinoHistory,
   fetchMyDominoesHistory,
   fetchMyDraughtsHistory,
+  fetchMyFiveHistory,
   fetchMyHistory,
   relativeDate,
   UnauthorizedError,
   type CasinoHistoryItem,
   type CasinoPlayer,
   type DraughtsHistoryItem,
+  type FiveHistoryItem,
   type GameResult,
   type HistoryItem,
 } from '../../lib/users';
 
-const HISTORY_GAMES: PlayableGameId[] = ['joda-memory', 'african-casino', 'dominoes', 'international-draughts'];
+const HISTORY_GAMES: PlayableGameId[] = ['joda-memory', 'african-casino', 'dominoes', 'international-draughts', 'five-in-a-row'];
 
 // The ways a draughts game ends, as the history labels them (EndReason on the server)
 const DRAUGHTS_REASONS = ['no-pieces', 'blocked', 'resignation', 'forfeit', 'agreement', 'repetition', 'kings-25', 'endgame-16', 'long-diagonal-5', 'endgame-5'] as const;
@@ -116,6 +118,33 @@ function DraughtsRow({ g }: { g: DraughtsHistoryItem }) {
       <span className="text-sm text-chalk" title={g.rulesVersion ? t('draughtsRules', { version: g.rulesVersion }) : undefined}>
         {reason ? `${reason} · ` : ''}
         {t('draughtsMoves', { n: g.moves })}
+      </span>
+      <PlayedAt iso={g.finishedAt} />
+    </li>
+  );
+}
+
+// The ways a five-in-a-row game ends
+const FIVE_REASONS = ['five', 'resignation', 'forfeit'] as const;
+
+// A five-in-a-row game: result, symbol played, opponent, how it ended and its length
+function FiveRow({ g }: { g: FiveHistoryItem }) {
+  const t = useT(profileMessages);
+  const known = (FIVE_REASONS as readonly (string | null)[]).includes(g.reason);
+  const reason = known ? t(`fiveReason_${g.reason as (typeof FIVE_REASONS)[number]}`) : g.reason;
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
+      <ResultChips result={g.result} forfeit={g.forfeit} />
+      <span className="chip px-2.5 py-0.5">
+        <span aria-hidden="true" className={`font-display font-extrabold ${g.symbol === 'X' ? 'text-signal' : 'text-white'}`}>
+          {g.symbol}
+        </span>
+        <span className="sr-only">{t('playedSymbol', { symbol: g.symbol })}</span>
+      </span>
+      <span className="min-w-0 flex-1 break-words font-semibold">{t('casinoVs', { names: g.opponent?.name || t('anonymousPlayer') })}</span>
+      <span className="text-sm text-chalk">
+        {reason ? `${reason} · ` : ''}
+        {t('fiveMoves', { n: g.moves })}
       </span>
       <PlayedAt iso={g.finishedAt} />
     </li>
@@ -291,7 +320,15 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
       </div>
       {HISTORY_GAMES.filter((id) => opened.includes(id)).map((id) => (
         <div key={id} role="tabpanel" id={`hist-panel-${id}`} aria-labelledby={`hist-tab-${id}`} hidden={id !== game}>
-          {id === 'international-draughts' ? (
+          {id === 'five-in-a-row' ? (
+            <HistoryList
+              fetchPage={fetchMyFiveHistory}
+              renderRow={(g) => <FiveRow key={g.id} g={g} />}
+              emptyText={t('noFiveGamesYet')}
+              playPath="/games/five-in-a-row"
+              onUnauthorized={onUnauthorized}
+            />
+          ) : id === 'international-draughts' ? (
             <HistoryList
               fetchPage={fetchMyDraughtsHistory}
               renderRow={(g) => <DraughtsRow key={g.id} g={g} />}

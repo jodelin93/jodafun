@@ -73,7 +73,7 @@ export default function DraughtsTutorial({ socket, onBack }: { socket: Socket; o
       ) : !step ? (
         <Loading />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
           <div className="mx-auto w-full max-w-[36rem]">
             {done ? (
               <DraughtsBoard tx={tx} view={done} flipped={false} label={t('boardLabel')} />

@@ -1,4 +1,4 @@
-import { UsersService, draughtsStats } from './users.service';
+import { UsersService, draughtsStats, fiveStats } from './users.service';
 
 // Answers each raw query with the next queued result and records the values bound into it
 function fakePrisma(answers: unknown[][], others: unknown[] = []) {
@@ -67,11 +67,12 @@ describe('UsersService team-game history and stats', () => {
     // What the query returns for existing data: only win and loss rows, so draws are 0
     const casino = { gamesPlayed: 4, wins: 3, draws: 0, losses: 1, twoPlayer: 1, fourPlayer: 3, pointsFor: 30, pointsAgainst: 20 };
     const dominoes = { gamesPlayed: 2, wins: 1, draws: 0, losses: 1, twoPlayer: 2, fourPlayer: 0, pointsFor: 210, pointsAgainst: 180 };
-    const prisma = fakePrisma([[totals], [], [casino], [dominoes], []]);
+    const prisma = fakePrisma([[totals], [], [casino], [dominoes], [], []]);
     const stats = await new UsersService(prisma as never).getStats('u');
     expect(prisma.bound[2]).toContain('african-casino');
     expect(prisma.bound[3]).toContain('dominoes');
     expect(prisma.bound[4]).toContain('international-draughts');
+    expect(prisma.bound[5]).toEqual(['u', 'five-in-a-row']);
     // The same numbers as before the draws column existed (losses = gamesPlayed - wins for them)
     expect(stats.casino).toEqual({ ...casino, losses: 1, winRate: 75 });
     expect(stats.dominoes).toEqual({ ...dominoes, losses: 1, winRate: 50 });
@@ -85,6 +86,16 @@ describe('UsersService team-game history and stats', () => {
       bestStreak: 0,
       asWhite: { gamesPlayed: 0, wins: 0, draws: 0, losses: 0 },
       asBlack: { gamesPlayed: 0, wins: 0, draws: 0, losses: 0 },
+    });
+    expect(stats.five).toEqual({
+      gamesPlayed: 0,
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      currentStreak: 0,
+      bestStreak: 0,
+      asX: { gamesPlayed: 0, wins: 0, losses: 0 },
+      asO: { gamesPlayed: 0, wins: 0, losses: 0 },
     });
   });
 });
@@ -173,5 +184,69 @@ describe('UsersService draughts stats and history', () => {
 
   it('rejects a cursor that is not one of the user’s rows', async () => {
     await expect(new UsersService(fakePrisma([]) as never).getDraughtsHistory('u', 'nope', 20)).rejects.toThrow('Invalid cursor');
+  });
+});
+
+describe('UsersService five-in-a-row stats and history', () => {
+  it('counts wins and losses by symbol (team 0 = X) with win streaks, newest first', async () => {
+    // Newest first: win, win, loss, win, win, win, loss
+    const rows = [
+      { result: 'win', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'loss', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'win', team: 0 },
+      { result: 'win', team: 1 },
+      { result: 'loss', team: 1 },
+    ];
+    const prisma = fakePrisma([rows]);
+    const stats = await new UsersService(prisma as never).getFiveStats('u');
+    expect(prisma.bound[0]).toEqual(['u', 'five-in-a-row']);
+    expect(stats).toEqual({
+      gamesPlayed: 7,
+      wins: 5,
+      losses: 2,
+      winRate: 71.4,
+      currentStreak: 2,
+      bestStreak: 3,
+      asX: { gamesPlayed: 3, wins: 2, losses: 1 },
+      asO: { gamesPlayed: 4, wins: 3, losses: 1 },
+    });
+    expect(Object.keys(stats)).not.toContain('draws');
+  });
+
+  it('has no current streak after a loss', () => {
+    expect(fiveStats([{ result: 'loss', symbol: 'X' }, { result: 'win', symbol: 'O' }])).toEqual(
+      expect.objectContaining({ gamesPlayed: 2, wins: 1, losses: 1, winRate: 50, currentStreak: 0, bestStreak: 1 }),
+    );
+  });
+
+  it('returns history rows with the symbol, the opponent by name and how the game ended', async () => {
+    const settings = { rulesVersion: 'five-in-a-row-1', reason: 'five', winnerSymbol: 'X', moves: 41, winLine: [] };
+    const finishedAt = new Date('2026-10-30T00:00:00Z');
+    const rows = [
+      { id: 'part-a', gameId: 'ga', finishedAt, result: 'win', team: 0, seat: 1, settings },
+      { id: 'part-b', gameId: 'gb', finishedAt, result: 'loss', team: 1, seat: 0, settings: { ...settings, reason: 'forfeit', winLine: null, moves: 3 } },
+      { id: 'part-c', gameId: 'gc', finishedAt, result: 'win', team: 0, seat: 0, settings },
+    ];
+    const others = [
+      { gameId: 'ga', seat: 0, name: 'Bo' },
+      { gameId: 'ga', seat: 1, name: 'Me' },
+      { gameId: 'gb', seat: 0, name: 'Me' },
+    ];
+    const prisma = fakePrisma([rows], others);
+    const page = await new UsersService(prisma as never).getFiveHistory('u', undefined, 2);
+    expect(prisma.bound[0]).toContain('five-in-a-row');
+    expect(page).toEqual({
+      items: [
+        { id: 'part-a', result: 'win', symbol: 'X', opponent: { name: 'Bo' }, reason: 'five', moves: 41, finishedAt, forfeit: false },
+        { id: 'part-b', result: 'loss', symbol: 'O', opponent: null, reason: 'forfeit', moves: 3, finishedAt, forfeit: true },
+      ],
+      nextCursor: 'part-b',
+    });
+  });
+
+  it('rejects a cursor that is not one of the user’s rows', async () => {
+    await expect(new UsersService(fakePrisma([]) as never).getFiveHistory('u', 'nope', 20)).rejects.toThrow('Invalid cursor');
   });
 });

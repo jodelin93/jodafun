@@ -71,7 +71,7 @@ export default function DraughtsResults({ tx, result, moves, myColor, opponentNa
       </section>
       {series && <MatchStatus tx={tx} series={series} seats={seats} mySeat={mySeat} />}
       {view && (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
           <DraughtsBoard tx={tx} view={view} flipped={myColor === 'black'} label={tx('finalPosition')} />
           <MoveList tx={tx} moves={view.moves} />
         </div>

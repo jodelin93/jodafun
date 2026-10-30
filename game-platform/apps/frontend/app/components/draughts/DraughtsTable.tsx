@@ -123,7 +123,7 @@ export default function DraughtsTable({ tx, view, myColor, opponent, canPlay, se
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
         <div className="mx-auto w-full max-w-[36rem] space-y-2">
           {playerBar(theirColor, theirName, opponent)}
           <MovePicker tx={tx} view={view} myColor={myColor} canMove={canPlay} sending={sending} onSubmit={onMove} />

@@ -57,6 +57,24 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
         { label: t('bestStreak'), value: draughts.bestStreak },
       ]
     : [];
+  // Five-in-a-row has no draws; split by the symbol played
+  const five = stats.five;
+  const fiveFigures = five
+    ? [
+        { label: t('games'), value: five.gamesPlayed },
+        { label: t('wins'), value: five.wins },
+        { label: t('losses'), value: five.losses },
+        { label: t('winRate'), value: `${five.winRate}%` },
+        { label: t('currentStreak'), value: five.currentStreak },
+        { label: t('bestStreak'), value: five.bestStreak },
+      ]
+    : [];
+  const bySymbol = five
+    ? ([
+        ['X', t('fiveAsX'), five.asX],
+        ['O', t('fiveAsO'), five.asO],
+      ] as const)
+    : [];
   const byColor = draughts
     ? ([
         ['white', t('draughtsAsWhite'), draughts.asWhite],
@@ -178,6 +196,37 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
             ))}
           </ul>
           <p className="mt-2 text-sm text-chalk">{t('draughtsNote')}</p>
+        </section>
+      )}
+
+      {five && (
+        <section aria-labelledby="five-h" className="mt-8">
+          <h2 id="five-h" className="title-md">
+            {gameTitle('five-in-a-row')}
+          </h2>
+          <dl className="panel mt-3 grid grid-cols-2 gap-x-4 gap-y-4 p-4 sm:grid-cols-3 sm:p-5">
+            {fiveFigures.map((f) => (
+              <div key={f.label}>
+                <dt className="text-sm text-chalk">{f.label}</dt>
+                <dd className="font-display text-2xl font-bold">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+            {bySymbol.map(([symbol, label, c]) => (
+              <li key={symbol} className="panel p-4">
+                <h3 className="flex items-center gap-2 font-semibold">
+                  <span aria-hidden="true" className={`font-display text-lg font-extrabold leading-none ${symbol === 'X' ? 'text-signal' : 'text-chalk'}`}>
+                    {symbol}
+                  </span>
+                  {label}
+                </h3>
+                <p className="mt-1 font-display text-2xl font-bold">{c.gamesPlayed}</p>
+                <p className="text-sm text-chalk">{t('fiveSymbolLine', { wins: c.wins, losses: c.losses })}</p>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-sm text-chalk">{t('fiveNote')}</p>
         </section>
       )}
     </>

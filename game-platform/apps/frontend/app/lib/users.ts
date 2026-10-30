@@ -34,6 +34,7 @@ export interface UserStats {
   // Dominoes results, same shape as Casino: twoPlayer is head-to-head, fourPlayer is partners
   dominoes?: CasinoStats;
   draughts?: DraughtsStats;
+  five?: FiveStats;
 }
 
 // International draughts: games can be drawn; asWhite / asBlack split the results by colour played
@@ -54,6 +55,24 @@ export interface DraughtsStats {
   bestStreak: number;
   asWhite: DraughtsColorStats;
   asBlack: DraughtsColorStats;
+}
+
+// Infinite five-in-a-row: no draws; asX / asO split the results by symbol played
+export interface FiveSymbolStats {
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+}
+
+export interface FiveStats {
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  currentStreak: number;
+  bestStreak: number;
+  asX: FiveSymbolStats;
+  asO: FiveSymbolStats;
 }
 
 // Draws exist only in draughts so far; the other games only ever send 'win' or 'loss'
@@ -127,6 +146,24 @@ export interface DraughtsHistoryPage {
   nextCursor: string | null;
 }
 
+// One finished five-in-a-row game, from this player's side. reason is 'five', 'resignation' or
+// 'forfeit'; moves counts the symbols placed
+export interface FiveHistoryItem {
+  id: string;
+  result: 'win' | 'loss';
+  symbol: 'X' | 'O';
+  opponent: { name: string } | null;
+  reason: string | null;
+  moves: number;
+  finishedAt: string;
+  forfeit: boolean;
+}
+
+export interface FiveHistoryPage {
+  items: FiveHistoryItem[];
+  nextCursor: string | null;
+}
+
 export class UnauthorizedError extends Error {
   constructor() {
     super('Not signed in');
@@ -177,6 +214,12 @@ export function fetchMyDraughtsHistory(cursor: string | null, signal?: AbortSign
   const q = new URLSearchParams({ game: 'international-draughts', limit: '20' });
   if (cursor) q.set('cursor', cursor);
   return getJson<DraughtsHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
+}
+
+export function fetchMyFiveHistory(cursor: string | null, signal?: AbortSignal) {
+  const q = new URLSearchParams({ game: 'five-in-a-row', limit: '20' });
+  if (cursor) q.set('cursor', cursor);
+  return getJson<FiveHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
 }
 
 export const fetchProfile = (id: string, signal?: AbortSignal) =>

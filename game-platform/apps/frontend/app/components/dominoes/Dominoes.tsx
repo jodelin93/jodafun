@@ -171,7 +171,7 @@ export default function Dominoes() {
       if (res.game === 'dominoes' && res.roomId) {
         setUrlRoom(res.roomId);
         void dominoes.rejoin(res.roomId);
-      } else if ((res.game === 'african-casino' || res.game === 'international-draughts') && res.roomId) {
+      } else if ((res.game === 'african-casino' || res.game === 'international-draughts' || res.game === 'five-in-a-row') && res.roomId) {
         router.push(roomPath(res.roomId, res.game));
       } else if (res.room) {
         router.push(roomPath(res.room.id, 'joda-memory'));
@@ -424,8 +424,8 @@ export default function Dominoes() {
       ? t(i.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: i.fromName })
       : i.game === 'african-casino'
         ? t('inviteCasino', { name: i.fromName, n: i.capacity ?? 2 })
-        : i.game === 'international-draughts'
-          ? t('inviteDraughts', { name: i.fromName, game: gameTitle('international-draughts') })
+        : i.game === 'international-draughts' || i.game === 'five-in-a-row'
+          ? t('inviteDraughts', { name: i.fromName, game: gameTitle(i.game) })
           : t('inviteMemory', { name: i.fromName });
 
   return (

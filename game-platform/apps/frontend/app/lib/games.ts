@@ -1,13 +1,13 @@
 import type { LucideIcon } from 'lucide-react';
 import type { homeMessages } from '../i18n/messages/home';
 import type { gameNameMessages } from '../i18n/messages/gameNames';
-import { Brain, ChessKnight, CircleDot, Dices, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
+import { Brain, ChessKnight, CircleDot, Dices, Grid3x3, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
 
 type MessageKey = keyof (typeof homeMessages)['en'];
 export type GameNameKey = keyof (typeof gameNameMessages)['en'];
 
 // Games with a real page and rooms behind them
-export type PlayableGameId = 'joda-memory' | 'african-casino' | 'dominoes' | 'international-draughts';
+export type PlayableGameId = 'joda-memory' | 'african-casino' | 'dominoes' | 'international-draughts' | 'five-in-a-row';
 
 // Proper names, never translated, except the games in TRANSLATED_NAMES (for those this is only the
 // English fallback; show names through useGameTitle)
@@ -16,11 +16,13 @@ export const GAME_TITLES: Record<PlayableGameId, string> = {
   'african-casino': 'Joda Casino',
   dominoes: 'Dominoes',
   'international-draughts': 'International Draughts',
+  'five-in-a-row': 'Infinite Five-in-a-Row',
 };
 
 // Games whose name and subtitle are translated (app/i18n/messages/gameNames.ts)
 export const TRANSLATED_NAMES: Partial<Record<string, { title: GameNameKey; subtitle: GameNameKey }>> = {
   'international-draughts': { title: 'draughtsTitle', subtitle: 'draughtsSubtitle' },
+  'five-in-a-row': { title: 'fiveTitle', subtitle: 'fiveSubtitle' },
 };
 
 // True for a game id the site has rooms for (e.g. a server's `gameType` or a saved room's `game`)
@@ -82,6 +84,16 @@ export const GAMES: Game[] = [
     players: '2',
     duration: '15–45',
     tags: ['tagBoardGame', 'tagStrategy', 'tagClassic'],
+    available: true,
+  },
+  {
+    id: 'five-in-a-row',
+    title: 'Infinite Five-in-a-Row', // shown translated (useGameTitle)
+    description: 'descFive',
+    Icon: Grid3x3,
+    players: '2',
+    duration: '5–20',
+    tags: ['tagBoardGame', 'tagStrategy', 'tagTurnBased'],
     available: true,
   },
   {

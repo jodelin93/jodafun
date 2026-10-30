@@ -6,6 +6,8 @@ import { DOMINOES_GAME_TYPE, type DominoRoom } from '../dominoes/dominoes.types'
 import { restoreMatch as restoreDominoMatch } from '../dominoes/engine/match';
 import { DRAUGHTS_GAME_TYPE, type DraughtsRoom } from '../draughts/draughts.types';
 import { restoreGame as restoreDraughtsGame } from '../draughts/engine/game';
+import { FIVE_GAME_TYPE, type FiveRoom } from '../five/five.types';
+import { restoreGame as restoreFiveGame } from '../five/engine/game';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 // classic: both players share one board and take turns; alternate: each clears the same decks on their own board
@@ -81,13 +83,15 @@ export interface GameRoom {
 }
 
 // Every game's rooms share one store and one code space; gameType tells them apart
-export type StoredRoom = GameRoom | CasinoRoom | DominoRoom | DraughtsRoom;
+export type StoredRoom = GameRoom | CasinoRoom | DominoRoom | DraughtsRoom | FiveRoom;
 export const isCasinoRoom = (room: StoredRoom | null | undefined): room is CasinoRoom =>
   room?.gameType === CASINO_GAME_TYPE;
 export const isDominoRoom = (room: StoredRoom | null | undefined): room is DominoRoom =>
   room?.gameType === DOMINOES_GAME_TYPE;
 export const isDraughtsRoom = (room: StoredRoom | null | undefined): room is DraughtsRoom =>
   room?.gameType === DRAUGHTS_GAME_TYPE;
+export const isFiveRoom = (room: StoredRoom | null | undefined): room is FiveRoom =>
+  room?.gameType === FIVE_GAME_TYPE;
 // Joda Memory rooms (older ones were saved without a gameType)
 export const isMemoryRoom = (room: StoredRoom | null | undefined): room is GameRoom =>
   !!room && (room.gameType === undefined || room.gameType === 'joda-memory');
@@ -135,6 +139,20 @@ export function deserializeRoom(raw: string): StoredRoom | null {
       }
       return room as DraughtsRoom;
     }
+    if (room.gameType === FIVE_GAME_TYPE) {
+      // A game that fails the engine's checks is dropped (the seats and unsaved results are kept);
+      // the block index is rebuilt from the cells
+      if (room.game) {
+        try {
+          room.game = restoreFiveGame(room.game);
+        } catch (error) {
+          console.error(`Dropping an invalid five-in-a-row game in room ${room.id}:`, error);
+          room.game = null;
+          room.status = 'lobby';
+        }
+      }
+      return room as FiveRoom;
+    }
     room.gameStartedAt = room.gameStartedAt ? new Date(room.gameStartedAt) : null;
     return room as GameRoom;
   } catch {
@@ -165,7 +183,7 @@ export class RoomStore implements OnModuleDestroy {
     return this.redis !== null;
   }
 
-  // Joda Memory rooms only; a Casino, Dominoes or draughts room's code is not a Memory room
+  // Joda Memory rooms only; a Casino, Dominoes, draughts or five-in-a-row room's code is not a Memory room
   get(code: string): GameRoom | undefined {
     const room = this.cache.get(code);
     return isMemoryRoom(room) ? room : undefined;
@@ -184,6 +202,11 @@ export class RoomStore implements OnModuleDestroy {
   getDraughts(code: string): DraughtsRoom | undefined {
     const room = this.cache.get(code);
     return isDraughtsRoom(room) ? room : undefined;
+  }
+
+  getFive(code: string): FiveRoom | undefined {
+    const room = this.cache.get(code);
+    return isFiveRoom(room) ? room : undefined;
   }
 
   gameTypeOf(code: string): string | undefined {
@@ -211,6 +234,10 @@ export class RoomStore implements OnModuleDestroy {
 
   draughtsRooms(): DraughtsRoom[] {
     return [...this.cache.values()].filter(isDraughtsRoom);
+  }
+
+  fiveRooms(): FiveRoom[] {
+    return [...this.cache.values()].filter(isFiveRoom);
   }
 
   allRooms(): StoredRoom[] {

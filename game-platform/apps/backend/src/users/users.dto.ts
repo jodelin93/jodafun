@@ -30,6 +30,6 @@ export class HistoryQueryDto {
 
   // Which game's history; Joda Memory when left out, as before
   @IsOptional()
-  @IsIn(['joda-memory', 'african-casino', 'dominoes', 'international-draughts'])
+  @IsIn(['joda-memory', 'african-casino', 'dominoes', 'international-draughts', 'five-in-a-row'])
   game?: string;
 }

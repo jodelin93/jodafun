@@ -1221,8 +1221,8 @@ export default function JodaMemory() {
         setIncomingInvite(null);
         return;
       }
-      // A Joda Casino, Dominoes or draughts request: the seat is ours, that game's page sits us down with the same player key
-      if (res?.success && (res.game === 'african-casino' || res.game === 'dominoes' || res.game === 'international-draughts') && res.roomId) {
+      // A Joda Casino, Dominoes, draughts or five-in-a-row request: the seat is ours, that game's page sits us down with the same player key
+      if (res?.success && (res.game === 'african-casino' || res.game === 'dominoes' || res.game === 'international-draughts' || res.game === 'five-in-a-row') && res.roomId) {
         setIncomingInvite(null);
         router.push(roomPath(res.roomId, res.game));
         return;
@@ -1704,8 +1704,8 @@ export default function JodaMemory() {
                   ? t(incomingInvite.capacity === 4 ? 'inviteBodyCasinoTeams' : 'inviteBodyCasino', { name: incomingInvite.fromName || t('aPlayer') })
                   : incomingInvite.game === 'dominoes'
                     ? t(incomingInvite.capacity === 4 ? 'inviteBodyDominoesTeams' : 'inviteBodyDominoes', { name: incomingInvite.fromName || t('aPlayer') })
-                    : incomingInvite.game === 'international-draughts'
-                    ? t('inviteBodyDraughts', { name: incomingInvite.fromName || t('aPlayer'), game: gameTitle('international-draughts') })
+                    : incomingInvite.game === 'international-draughts' || incomingInvite.game === 'five-in-a-row'
+                    ? t('inviteBodyDraughts', { name: incomingInvite.fromName || t('aPlayer'), game: gameTitle(incomingInvite.game) })
                     : incomingInvite.mode === 'alternate'
                     ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
                     : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}

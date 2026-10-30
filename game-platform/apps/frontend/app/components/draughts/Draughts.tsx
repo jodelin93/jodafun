@@ -431,8 +431,8 @@ export default function Draughts() {
   }
 
   const inviteBody = (i: Invite) =>
-    i.game === GAME
-      ? t('inviteDraughts', { name: i.fromName, game: gameTitle(GAME) })
+    i.game === GAME || i.game === 'five-in-a-row'
+      ? t('inviteDraughts', { name: i.fromName, game: gameTitle(i.game) })
       : i.game === 'dominoes'
         ? t(i.capacity === 4 ? 'inviteDominoesTeams' : 'inviteDominoes', { name: i.fromName })
         : i.game === 'african-casino'

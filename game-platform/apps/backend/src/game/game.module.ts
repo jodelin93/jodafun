@@ -11,6 +11,9 @@ import { DominoResults } from '../dominoes/dominoes-results';
 import { DraughtsGateway } from '../draughts/draughts.gateway';
 import { DraughtsService } from '../draughts/draughts.service';
 import { DraughtsResults } from '../draughts/draughts-results';
+import { FiveGateway } from '../five/five.gateway';
+import { FiveService } from '../five/five.service';
+import { FiveResults } from '../five/five-results';
 
 @Module({
   providers: [
@@ -26,6 +29,9 @@ import { DraughtsResults } from '../draughts/draughts-results';
     DraughtsService,
     DraughtsResults,
     DraughtsGateway,
+    FiveService,
+    FiveResults,
+    FiveGateway,
   ],
 })
 export class GameModule {}

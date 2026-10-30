@@ -31,6 +31,9 @@ export class UsersController {
     if (query.game === 'international-draughts') {
       return this.usersService.getDraughtsHistory(req.sessionUser.id, query.cursor, limit);
     }
+    if (query.game === 'five-in-a-row') {
+      return this.usersService.getFiveHistory(req.sessionUser.id, query.cursor, limit);
+    }
     return this.usersService.getHistory(req.sessionUser.id, query.cursor, limit);
   }
 

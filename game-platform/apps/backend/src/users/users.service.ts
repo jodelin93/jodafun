@@ -8,11 +8,29 @@ const GAME_TYPE = 'joda-memory';
 const CASINO = 'african-casino';
 const DOMINOES = 'dominoes';
 const DRAUGHTS = 'international-draughts';
+const FIVE = 'five-in-a-row';
 // Games recorded in game_participants (one row per seat, with teams)
 export type TeamGameType = typeof CASINO | typeof DOMINOES;
 export type GameResult = 'win' | 'loss' | 'draw';
 
 type ColorRecord = { gamesPlayed: number; wins: number; draws: number; losses: number };
+type SideRecord = { gamesPlayed: number; wins: number; losses: number };
+
+// Win rate and win streaks of a two-player game, from the user's results newest first:
+// winRate = wins / gamesPlayed × 100, rounded to 0.1; streaks count consecutive wins, and anything
+// but a win (a loss or a draw) ends one
+function winFigures(results: readonly { result: GameResult }[]) {
+  const wins = results.filter(r => r.result === 'win').length;
+  let currentStreak = 0;
+  while (currentStreak < results.length && results[currentStreak].result === 'win') currentStreak++;
+  let bestStreak = 0;
+  let run = 0;
+  for (const r of results) {
+    run = r.result === 'win' ? run + 1 : 0;
+    bestStreak = Math.max(bestStreak, run);
+  }
+  return { winRate: results.length ? Math.round((wins / results.length) * 1000) / 10 : 0, currentStreak, bestStreak };
+}
 
 /**
  * Draughts profile figures from the user's results, newest first. A draw is a game played but not
@@ -26,22 +44,27 @@ export function draughtsStats(results: readonly { result: GameResult; color: 'wh
     draws: rows.filter(r => r.result === 'draw').length,
     losses: rows.filter(r => r.result === 'loss').length,
   });
-  const all = record(results);
-  let currentStreak = 0;
-  while (currentStreak < results.length && results[currentStreak].result === 'win') currentStreak++;
-  let bestStreak = 0;
-  let run = 0;
-  for (const r of results) {
-    run = r.result === 'win' ? run + 1 : 0;
-    bestStreak = Math.max(bestStreak, run);
-  }
   return {
-    ...all,
-    winRate: all.gamesPlayed ? Math.round((all.wins / all.gamesPlayed) * 1000) / 10 : 0,
-    currentStreak,
-    bestStreak,
+    ...record(results),
+    ...winFigures(results),
     asWhite: record(results.filter(r => r.color === 'white')),
     asBlack: record(results.filter(r => r.color === 'black')),
+  };
+}
+
+// Five-in-a-row profile figures from the user's results, newest first. The game has no draw, so
+// every game is a win or a loss; winRate and streaks as for draughts.
+export function fiveStats(results: readonly { result: GameResult; symbol: 'X' | 'O' }[]) {
+  const record = (rows: typeof results): SideRecord => ({
+    gamesPlayed: rows.length,
+    wins: rows.filter(r => r.result === 'win').length,
+    losses: rows.filter(r => r.result === 'loss').length,
+  });
+  return {
+    ...record(results),
+    ...winFigures(results),
+    asX: record(results.filter(r => r.symbol === 'X')),
+    asO: record(results.filter(r => r.symbol === 'O')),
   };
 }
 
@@ -143,6 +166,7 @@ export class UsersService {
       casino: await this.getTeamGameStats(userId, CASINO),
       dominoes: await this.getTeamGameStats(userId, DOMINOES),
       draughts: await this.getDraughtsStats(userId),
+      five: await this.getFiveStats(userId),
     };
   }
 
@@ -190,8 +214,59 @@ export class UsersService {
     return draughtsStats(rows.map(r => ({ result: r.result, color: r.team === 0 ? 'white' : 'black' })));
   }
 
+  // Five-in-a-row results, newest first; team 0 is X, 1 is O
+  async getFiveStats(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ result: GameResult; team: number }[]>`
+      SELECT p.result, p.team
+      FROM game_participants p
+      JOIN games g ON g.id = p.game_id
+      WHERE p.user_id = ${userId} AND g.game_type = ${FIVE}
+      ORDER BY g.completed_at DESC, p.id DESC`;
+    return fiveStats(rows.map(r => ({ result: r.result, symbol: r.team === 0 ? 'X' : 'O' })));
+  }
+
   // One row per draughts game the user played: their colour, the opponent by name, how it ended
   async getDraughtsHistory(userId: string, cursor: string | undefined, limit: number) {
+    const { page, opponentOf, nextCursor } = await this.twoPlayerHistory(userId, DRAUGHTS, cursor, limit);
+    return {
+      items: page.map(r => ({
+        id: r.id,
+        result: r.result,
+        color: r.team === 0 ? ('white' as const) : ('black' as const),
+        // A name only: the opponent's account id stays private
+        opponent: opponentOf(r),
+        reason: r.settings?.reason ?? null,
+        moves: r.settings?.moves ?? 0,
+        rulesVersion: r.settings?.rulesVersion ?? null,
+        finishedAt: r.finishedAt,
+        forfeit: r.settings?.forfeit === true,
+      })),
+      nextCursor,
+    };
+  }
+
+  // One row per five-in-a-row game the user played: their symbol, the opponent by name, how it ended
+  async getFiveHistory(userId: string, cursor: string | undefined, limit: number) {
+    const { page, opponentOf, nextCursor } = await this.twoPlayerHistory(userId, FIVE, cursor, limit);
+    return {
+      items: page.map(r => ({
+        id: r.id,
+        result: r.result,
+        symbol: r.team === 0 ? ('X' as const) : ('O' as const),
+        // A name only: the opponent's account id stays private
+        opponent: opponentOf(r),
+        reason: r.settings?.reason ?? null,
+        moves: r.settings?.moves ?? 0,
+        finishedAt: r.finishedAt,
+        forfeit: r.settings?.reason === 'forfeit',
+      })),
+      nextCursor,
+    };
+  }
+
+  // A page of the user's rows of a two-player game (draughts, five-in-a-row), newest first, with
+  // the opponent of each row by name
+  private async twoPlayerHistory(userId: string, gameType: string, cursor: string | undefined, limit: number) {
     let after = Prisma.empty;
     if (cursor) {
       const row = await this.prisma.gameParticipant.findFirst({
@@ -216,7 +291,7 @@ export class UsersService {
       SELECT p.id, p.game_id AS "gameId", g.completed_at AS "finishedAt", p.result, p.team, p.seat, g.settings
       FROM game_participants p
       JOIN games g ON g.id = p.game_id
-      WHERE p.user_id = ${userId} AND g.game_type = ${DRAUGHTS} ${after}
+      WHERE p.user_id = ${userId} AND g.game_type = ${gameType} ${after}
       ORDER BY g.completed_at DESC, p.id DESC
       LIMIT ${limit + 1}`;
     const page = rows.slice(0, limit);
@@ -226,24 +301,11 @@ export class UsersService {
           select: { gameId: true, seat: true, name: true },
         })
       : [];
-    return {
-      items: page.map(r => {
-        const opponent = others.find(o => o.gameId === r.gameId && o.seat !== r.seat);
-        return {
-          id: r.id,
-          result: r.result,
-          color: r.team === 0 ? ('white' as const) : ('black' as const),
-          // A name only: the opponent's account id stays private
-          opponent: opponent ? { name: opponent.name } : null,
-          reason: r.settings?.reason ?? null,
-          moves: r.settings?.moves ?? 0,
-          rulesVersion: r.settings?.rulesVersion ?? null,
-          finishedAt: r.finishedAt,
-          forfeit: r.settings?.forfeit === true,
-        };
-      }),
-      nextCursor: rows.length > limit ? page[page.length - 1].id : null,
+    const opponentOf = (r: (typeof page)[number]) => {
+      const opponent = others.find(o => o.gameId === r.gameId && o.seat !== r.seat);
+      return opponent ? { name: opponent.name } : null;
     };
+    return { page, opponentOf, nextCursor: rows.length > limit ? page[page.length - 1].id : null };
   }
 
   // One row per Casino or Dominoes match the user played, with their teammate and opponents by name

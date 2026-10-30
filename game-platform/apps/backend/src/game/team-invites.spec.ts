@@ -3,6 +3,7 @@ import type { SessionUser } from '../auth/session';
 import { CasinoService } from '../casino/casino.service';
 import { DominoesService } from '../dominoes/dominoes.service';
 import { DraughtsService } from '../draughts/draughts.service';
+import { FiveService } from '../five/five.service';
 import { GameGateway } from './game.gateway';
 import { RoomStore } from './room-store';
 
@@ -31,7 +32,8 @@ function setup() {
   const casino = new CasinoService(store, { save: async () => true } as never);
   const dominoes = new DominoesService(store, { save: async () => true } as never);
   const draughts = new DraughtsService(store, { save: async () => true } as never);
-  const gateway = new GameGateway({} as never, store, sessions as never, casino, dominoes, draughts);
+  const five = new FiveService(store, { save: async () => true } as never);
+  const gateway = new GameGateway({} as never, store, sessions as never, casino, dominoes, draughts, five);
   const connected = new Set<string>();
   const server = fakeServer(connected);
   gateway.server = server as never;
@@ -49,8 +51,9 @@ function setup() {
     dominoes.onModuleDestroy();
     casino.onModuleDestroy();
     draughts.onModuleDestroy();
+    five.onModuleDestroy();
   };
-  return { store, casino, dominoes, draughts, gateway, server, socket, close };
+  return { store, casino, dominoes, draughts, five, gateway, server, socket, close };
 }
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -165,6 +168,38 @@ describe('Invitations into Dominoes rooms', () => {
       ['d0', 0],
       ['t1', 1],
     ]);
+    close();
+  });
+
+  it('fills the free seat of a five-in-a-row room through the five-in-a-row join, and sends a Memory join there', async () => {
+    const { five, gateway, server, socket, store, close } = setup();
+    const host = socket('f0', 0);
+    const created = await five.create('f0', user(0), { name: 'Ana', playerKey: 'browser-key-f0' });
+    if (!created.ok) throw new Error();
+    const target = socket('t1', 1);
+    await gateway.handlePresenceUpdate({ available: true, name: 'T1', playerKey: 'browser-key-t1' }, target);
+    const game = 'five-in-a-row';
+    const sent = await gateway.handleInviteSend({ toId: 't1', playerKey: 'browser-key-f0', game, roomId: created.roomId }, host);
+    expect(sent.success).toBe(true);
+    expect(server.sent.find(e => e.to === 't1' && e.event === 'invite:received')!.payload).toEqual(
+      expect.objectContaining({ from: { id: 'f0', name: 'Ana' }, game, capacity: 2 }),
+    );
+    const inviteId = (sent as { inviteId: string }).inviteId;
+    expect(await gateway.handleInviteRespond({ inviteId, accept: true, playerKey: 'browser-key-t1' }, target)).toEqual({
+      success: true,
+      game,
+      roomId: created.roomId,
+    });
+    expect(store.getFive(created.roomId)!.players.map(p => [p.socketId, p.seat])).toEqual([
+      ['f0', 0],
+      ['t1', 1],
+    ]);
+    const visitor = socket('v1', 2);
+    expect(await gateway.handleJoinGame({ roomId: created.roomId, playerName: 'V' }, visitor)).toEqual({
+      success: false,
+      error: 'Wrong game',
+      gameType: 'five-in-a-row',
+    });
     close();
   });
 
