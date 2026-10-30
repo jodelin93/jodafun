@@ -16,12 +16,6 @@ export interface Build {
 
 export interface TeamHandScore {
   cards: number;
-  spades: number;
-  mostCards: number;
-  mostSpades: number;
-  twoOfSpades: number;
-  tenOfDiamonds: number;
-  aces: number;
   total: number;
 }
 

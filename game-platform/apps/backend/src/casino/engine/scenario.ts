@@ -34,7 +34,7 @@ export function scenario(opts: {
   const placed = new Set([...opts.hands.flat(), ...(opts.loose ?? []), ...builds.flatMap(buildCards), ...piles.flat(), ...stock]);
   return {
     version: 1,
-    config: { players, targetPoints: opts.target ?? 21, redealStrongLayout: true },
+    config: { players, targetPoints: opts.target ?? 7, redealStrongLayout: false },
     dealer: opts.dealer ?? players - 1,
     turn: opts.turn ?? 0,
     handNumber: 1,

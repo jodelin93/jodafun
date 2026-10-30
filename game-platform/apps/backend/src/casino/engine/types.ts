@@ -23,14 +23,9 @@ export interface Build {
   groups: BuildCard[][];
 }
 
+// Hands scored before card-count scoring also carry spades, aces and the other old items
 export interface TeamHandScore {
   cards: number;
-  spades: number;
-  mostCards: number;
-  mostSpades: number;
-  twoOfSpades: number;
-  tenOfDiamonds: number;
-  aces: number;
   total: number;
 }
 

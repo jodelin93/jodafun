@@ -549,21 +549,26 @@ export function dealRound(s: MatchState, cards: string[]) {
   cards.forEach((id, i) => s.hands[(s.dealer + 1 + (i % players)) % players].push(id));
 }
 
+// Points for the side with more cards: the fewest cards that earn each number of points
+const CARD_POINTS: [number, number][] = [
+  [52, 8],
+  [49, 7],
+  [46, 6],
+  [42, 5],
+  [39, 4],
+  [36, 3],
+  [33, 2],
+  [27, 1],
+];
+
+export const pointsForCards = (cards: number) => CARD_POINTS.find(([least]) => cards >= least)?.[1] ?? 0;
+
+// Only the side with more cards scores; 26 each scores nothing
 export function scoreHand(piles: string[][]) {
-  const counts = piles.map(pile => ({
-    cards: pile.length,
-    spades: pile.filter(id => id.endsWith('S')).length,
-    twoOfSpades: pile.includes('2S') ? 1 : 0,
-    tenOfDiamonds: pile.includes('10D') ? 2 : 0,
-    aces: pile.filter(isAce).length,
-  }));
-  // Two sides: the larger count takes 2, a tie gives 1 each
-  const share = (mine: number, theirs: number) => (mine > theirs ? 2 : mine === theirs ? 1 : 0);
-  return counts.map((c, team) => {
-    const other = counts[1 - team];
-    const mostCards = share(c.cards, other.cards);
-    const mostSpades = share(c.spades, other.spades);
-    return { ...c, mostCards, mostSpades, total: mostCards + mostSpades + c.twoOfSpades + c.tenOfDiamonds + c.aces };
+  return piles.map((pile, team) => {
+    const cards = pile.length;
+    const other = piles[1 - team]?.length ?? 0;
+    return { cards, total: cards > other ? pointsForCards(cards) : 0 };
   });
 }
 

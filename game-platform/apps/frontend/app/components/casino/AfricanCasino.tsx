@@ -15,7 +15,7 @@ import { useCasinoRoom } from '../../lib/casino/useCasinoRoom';
 import { teamOfSeat, type TurnAction, type TurnProposal } from '../../lib/casino/types';
 import { useT } from '../../i18n/I18nProvider';
 import { casinoMessages } from '../../i18n/messages/casino';
-import CasinoLobby from './CasinoLobby';
+import CasinoLobby, { TARGETS } from './CasinoLobby';
 import CasinoTable, { type SeatInfo } from './CasinoTable';
 import CasinoResults from './CasinoResults';
 import CasinoRules from './CasinoRules';
@@ -38,7 +38,7 @@ export default function AfricanCasino() {
   const [screen, setScreen] = useState<Screen>('menu');
   const [name, setName] = useState('');
   const [players, setPlayers] = useState<2 | 4>(2);
-  const [target, setTarget] = useState(21);
+  const [target, setTarget] = useState(7);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -350,7 +350,7 @@ export default function AfricanCasino() {
                   {t('targetLabel')}
                 </label>
                 <select id="new-target" className="field" value={target} onChange={e => setTarget(Number(e.target.value))}>
-                  {[11, 21, 31, 41, 61].map(n => (
+                  {TARGETS.map(n => (
                     <option key={n} value={n}>
                       {t('targetPoints', { n })}
                     </option>

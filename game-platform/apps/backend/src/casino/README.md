@@ -25,11 +25,12 @@ Seats, deal and turn order
   After each hand the deal passes to the right (dealer + 1).
 - House choice: everyone is dealt 4 cards at a time. When every hand is empty, 4 more each go onto
   the same table from the rest of the deck, until it is used up: three deals with four players, six
-  with two. (The source deals 12 each, or 12 and then 12 more with two players; the cards played and
-  the scoring are the same, only the hands are smaller.)
+  with two. (The source deals 12 each, or 12 and then 12 more with two players; the cards played are
+  the same, only the hands are smaller.)
 - House choice (the source "suggests" it): if the four layout cards are worth 3 or more points
   (10♦ = 2, 2♠ = 1, each ace = 1) or include three or more picture cards, they are shuffled back
-  and the cut is repeated. On by default (`redealStrongLayout`).
+  and the cut is repeated. Off by default since card-count scoring (`redealStrongLayout`), because
+  those cards no longer score.
 
 A turn
 - A turn is an ordered list of actions and plays exactly one card from hand.
@@ -112,10 +113,13 @@ ask, so:
 
 ## Scoring and match
 
-Per hand (11 points in total): most cards 2 (tie 1 each), most spades 2 (tie 1 each), 2♠ 1,
-10♦ 2, each ace 1. No bonus for sweeps.
+House choice (Joda Fun): only the number of cards counts. After each hand only the side with more
+cards scores, by how many it took: 27–32 → 1, 33–35 → 2, 36–38 → 3, 39–41 → 4, 42–45 → 5,
+46–48 → 6, 49–51 → 7, all 52 → 8. 26 each scores nothing. Spades, 2♠, 10♦ and aces earn nothing
+(the Swazi source scores 11 points a hand from those items). Hands scored before this change keep
+their old breakdown fields in `results` and in `game_hands.breakdown`.
 
-A match is played to a target (21 by default, a room setting between 11 and 61). Victory is checked
+A match is played to a target (7 by default, a room setting between 3 and 31). Victory is checked
 only after a completed hand: the side with the most points wins once it has reached the target.
 If the leaders are tied at or above the target, another hand is played.
 

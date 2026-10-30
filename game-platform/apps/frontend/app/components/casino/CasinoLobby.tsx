@@ -18,7 +18,7 @@ type Props = {
   errorText: (code: string) => string;
 };
 
-const TARGETS = [11, 21, 31, 41, 61];
+export const TARGETS = [3, 5, 7, 11, 15, 21];
 
 // Seats, teams, readiness and the target before a match; the host can change the target
 export default function CasinoLobby({ room, myPlayerId, socket, onAction, onLeave, errorText }: Props) {

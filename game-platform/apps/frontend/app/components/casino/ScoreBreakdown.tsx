@@ -2,20 +2,16 @@
 
 import type { HandResult, TeamHandScore } from '../../lib/casino/types';
 
-const NONE: TeamHandScore = { cards: 0, spades: 0, mostCards: 0, mostSpades: 0, twoOfSpades: 0, tenOfDiamonds: 0, aces: 0, total: 0 };
+const NONE: TeamHandScore = { cards: 0, total: 0 };
 import { useT } from '../../i18n/I18nProvider';
 import { casinoMessages } from '../../i18n/messages/casino';
 
-// One hand's points for both sides, item by item (11 in all)
+// One hand for both sides: the cards each took and the points (only the side with more cards scores)
 export default function ScoreBreakdown({ result, teamNames }: { result: HandResult; teamNames: string[] }) {
   const t = useT(casinoMessages);
   const side = (team: number) => result.teams[team] ?? NONE;
   const rows: { label: string; values: (team: number) => string | number }[] = [
-    { label: t('bdMostCards'), values: team => `${side(team).mostCards} (${t('bdCards', { n: side(team).cards })})` },
-    { label: t('bdMostSpades'), values: team => `${side(team).mostSpades} (${t('bdSpades', { n: side(team).spades })})` },
-    { label: t('bdTwoOfSpades'), values: team => side(team).twoOfSpades },
-    { label: t('bdTenOfDiamonds'), values: team => side(team).tenOfDiamonds },
-    { label: t('bdAces'), values: team => side(team).aces },
+    { label: t('bdCardsTitle'), values: team => side(team).cards },
   ];
   return (
     <table className="w-full text-sm">

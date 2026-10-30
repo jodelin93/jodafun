@@ -1,11 +1,12 @@
 import { assertValidState, createMatch, legalTurns, playTurn, publicView, restoreMatch, serializeMatch } from './match';
+import { pointsForCards } from './turn';
 import { seededRandom } from './test-helpers';
 import type { MatchState, PlayerCount } from './types';
 
 const cardsInHands = (s: MatchState) => s.hands.reduce((n, h) => n + h.length, 0) + s.stock.length;
 
 // Plays a whole match choosing among the legal turns at random; returns how it went
-function simulate(players: PlayerCount, seed: number, target = 21) {
+function simulate(players: PlayerCount, seed: number, target = 7) {
   const random = seededRandom(seed);
   let state = createMatch({ players, targetPoints: target }, random);
   let turns = 0;
@@ -29,8 +30,10 @@ function simulate(players: PlayerCount, seed: number, target = 21) {
     if (result.handResult) {
       hands++;
       const points = result.handResult.teams.reduce((n, t) => n + t.total, 0);
-      // 11 points a hand, unless nobody ever captured (then the table cards go unscored)
-      if (result.handResult.lastCapturer !== null) expect(points).toBe(11);
+      // Only the side with more cards scores, by the card-count table
+      const [a, b] = result.handResult.teams;
+      expect(Math.min(a.total, b.total)).toBe(0);
+      expect(points).toBe(a.cards === b.cards ? 0 : pointsForCards(Math.max(a.cards, b.cards)));
     } else {
       // Exactly one card left the hands and stock together (a new deal only moves stock to hands)
       expect(cardsInHands(before) - cardsInHands(state)).toBe(1);
@@ -50,7 +53,7 @@ describe('simulated matches', () => {
   it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])('plays a full two-player match (seed %i)', seed => {
     const { state, hands } = simulate(2, seed);
     expect(state.status).toBe('finished');
-    expect(state.scores[state.winnerTeam!]).toBeGreaterThanOrEqual(21);
+    expect(state.scores[state.winnerTeam!]).toBeGreaterThanOrEqual(7);
     expect(state.scores[state.winnerTeam!]).toBeGreaterThan(state.scores[1 - state.winnerTeam!]);
     expect(state.results).toHaveLength(hands);
   });
@@ -58,12 +61,12 @@ describe('simulated matches', () => {
   it.each([13, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 108])('plays a full four-player match (seed %i)', seed => {
     const { state } = simulate(4, seed);
     expect(state.status).toBe('finished');
-    expect(state.scores[state.winnerTeam!]).toBeGreaterThanOrEqual(21);
+    expect(state.scores[state.winnerTeam!]).toBeGreaterThanOrEqual(7);
   });
 
   it('rotates the dealer to the right after every hand', () => {
     const random = seededRandom(42);
-    let state = createMatch({ players: 4, targetPoints: 61 }, random, 0);
+    let state = createMatch({ players: 4, targetPoints: 31 }, random, 0);
     const dealers = [state.dealer];
     while (state.status === 'playing' && state.handNumber < 4) {
       const options = legalTurns(state, state.turn);

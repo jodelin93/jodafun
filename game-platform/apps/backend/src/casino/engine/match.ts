@@ -3,9 +3,9 @@ import { findAddableSet, findSetWithValue } from './sets';
 import { HAND_SIZE, applyTurn, buildCards, dealRound, pileTop, positionAfter, teamOf } from './turn';
 import type { AceValue, Build, CasinoConfig, HandResult, LastTurn, MatchState, RuleError, Seat, TurnAction, TurnProposal } from './types';
 
-export const DEFAULT_TARGET_POINTS = 21;
-export const MIN_TARGET_POINTS = 11;
-export const MAX_TARGET_POINTS = 61;
+export const DEFAULT_TARGET_POINTS = 7;
+export const MIN_TARGET_POINTS = 3;
+export const MAX_TARGET_POINTS = 31;
 const MAX_RECUTS = 50;
 
 export function normalizeConfig(input: Partial<CasinoConfig>): CasinoConfig {
@@ -13,7 +13,8 @@ export function normalizeConfig(input: Partial<CasinoConfig>): CasinoConfig {
   return {
     players: input.players === 4 ? 4 : 2,
     targetPoints: Number.isInteger(target) && target >= MIN_TARGET_POINTS && target <= MAX_TARGET_POINTS ? target : DEFAULT_TARGET_POINTS,
-    redealStrongLayout: input.redealStrongLayout !== false,
+    // Off: it balanced the old point cards, which no longer score
+    redealStrongLayout: input.redealStrongLayout === true,
   };
 }
 

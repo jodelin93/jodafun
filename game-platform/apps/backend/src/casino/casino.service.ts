@@ -7,6 +7,7 @@ import { presenceName } from '../game/presence';
 import { secureRandomInt, shuffle, type RandomInt } from './engine/cards';
 import {
   createMatch,
+  DEFAULT_TARGET_POINTS,
   findLegalTurn,
   legalTurns,
   MAX_TARGET_POINTS,
@@ -123,7 +124,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy {
     if (!user) return Promise.resolve(fail('AUTH_REQUIRED'));
     if (!validKey(input.playerKey)) return Promise.resolve(fail('BAD_REQUEST'));
     if (this.seatOf(socketId)) return Promise.resolve(fail('ALREADY_SEATED'));
-    const target = input.targetPoints === undefined ? 21 : Number(input.targetPoints);
+    const target = input.targetPoints === undefined ? DEFAULT_TARGET_POINTS : Number(input.targetPoints);
     if (!this.validTarget(target)) return Promise.resolve(fail('INVALID_TARGET'));
 
     const now = Date.now();

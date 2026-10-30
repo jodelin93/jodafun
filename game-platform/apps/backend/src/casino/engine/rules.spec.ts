@@ -1,7 +1,7 @@
 import { DECK } from './cards';
 import { assertValidState, createMatch, publicView, privateView, requestHold, restoreMatch, serializeMatch } from './match';
 import { scenario, seededRandom, single } from './test-helpers';
-import { applyPileTake, applyTurn, parseTurn, scoreHand } from './turn';
+import { applyPileTake, applyTurn, parseTurn, pointsForCards, scoreHand } from './turn';
 import type { MatchState, TurnAction } from './types';
 
 const turn = (state: MatchState, seat: number, ...actions: TurnAction[]) => applyTurn(state, seat, { actions });
@@ -36,19 +36,22 @@ describe('cards and deal', () => {
     assertValidState(state);
   });
 
-  it('recuts a layout worth 3+ points or with 3 picture cards', () => {
+  it('recuts a layout worth 3+ points or with 3 picture cards when turned on (off by default)', () => {
+    expect(createMatch({}, seededRandom(1)).config.redealStrongLayout).toBe(false);
     for (let seed = 0; seed < 300; seed++) {
-      const { loose } = createMatch({ players: 4 }, seededRandom(seed));
+      const { loose } = createMatch({ players: 4, redealStrongLayout: true }, seededRandom(seed));
       const points = loose.reduce((p, id) => p + (id === '10D' ? 2 : id === '2S' || id.startsWith('A') ? 1 : 0), 0);
       const pictures = loose.filter(id => /^[JQK]/.test(id)).length;
       expect(points < 3 && pictures < 3).toBe(true);
     }
   });
 
-  it('uses the default target of 21 and keeps a configured one in range', () => {
-    expect(createMatch({}, seededRandom(3)).config.targetPoints).toBe(21);
+  it('uses the default target of 7 and keeps a configured one in range', () => {
+    expect(createMatch({}, seededRandom(3)).config.targetPoints).toBe(7);
     expect(createMatch({ targetPoints: 31 }, seededRandom(3)).config.targetPoints).toBe(31);
-    expect(createMatch({ targetPoints: 5 }, seededRandom(3)).config.targetPoints).toBe(21);
+    expect(createMatch({ targetPoints: 5 }, seededRandom(3)).config.targetPoints).toBe(5);
+    expect(createMatch({ targetPoints: 2 }, seededRandom(3)).config.targetPoints).toBe(7);
+    expect(createMatch({ targetPoints: 61 }, seededRandom(3)).config.targetPoints).toBe(7);
   });
 });
 
@@ -413,38 +416,45 @@ describe('a whole turn', () => {
 });
 
 describe('scoring', () => {
-  const ids = (suit: string) => DECK.filter(c => c.suit === suit).map(c => c.id);
+  const deck = DECK.map(c => c.id);
 
-  it('scores 11 points for a whole deck', () => {
-    const [a, b] = scoreHand([[...ids('S'), ...ids('H')], [...ids('D'), ...ids('C')]]);
-    expect(a).toEqual(expect.objectContaining({ cards: 26, mostCards: 1, mostSpades: 2, twoOfSpades: 1, tenOfDiamonds: 0, aces: 2, total: 6 }));
-    expect(b).toEqual(expect.objectContaining({ mostCards: 1, mostSpades: 0, tenOfDiamonds: 2, aces: 2, total: 5 }));
+  it('gives points by how many cards the side with more cards took', () => {
+    const table: [number, number][] = [
+      [26, 0], [27, 1], [32, 1], [33, 2], [35, 2], [36, 3], [38, 3], [39, 4],
+      [41, 4], [42, 5], [45, 5], [46, 6], [48, 6], [49, 7], [51, 7], [52, 8],
+    ];
+    for (const [cards, points] of table) expect([cards, pointsForCards(cards)]).toEqual([cards, points]);
   });
 
-  it('splits tied majorities', () => {
-    const [a, b] = scoreHand([['2S', '3S', 'KH'], ['4S', '5S', 'KD']]);
-    expect([a.mostCards, a.mostSpades, b.mostCards, b.mostSpades]).toEqual([1, 1, 1, 1]);
+  it('scores only the side with more cards, and nobody on 26 each', () => {
+    expect(scoreHand([deck.slice(0, 30), deck.slice(30)])).toEqual([{ cards: 30, total: 1 }, { cards: 22, total: 0 }]);
+    expect(scoreHand([deck.slice(0, 12), deck.slice(12)])).toEqual([{ cards: 12, total: 0 }, { cards: 40, total: 4 }]);
+    expect(scoreHand([deck.slice(0, 26), deck.slice(26)])).toEqual([{ cards: 26, total: 0 }, { cards: 26, total: 0 }]);
+    expect(scoreHand([deck, []])).toEqual([{ cards: 52, total: 8 }, { cards: 0, total: 0 }]);
   });
 
-  // Seat 0 plays the last card; team 0 then scores 3 (most spades 2, cards tied 1) and team 1 scores 1
-  const lastCard = (scores: number[]) => scenario({ turn: 0, hands: [['2C'], []], loose: ['KD'], piles: [['9S'], ['9H']], scores, target: 21 });
+  // Seat 0 plays the last card; team 0 ends with 30 cards against 20 and scores 1 point
+  const rest = deck.filter(id => id !== '2C' && id !== 'KD');
+  const lastCard = (scores: number[]) =>
+    scenario({ turn: 0, hands: [['2C'], []], loose: ['KD'], piles: [rest.slice(0, 30), rest.slice(30)], scores, target: 7 });
 
   it('checks for a winner only after a hand', () => {
-    const next = ok(turn(lastCard([10, 10]), 0, { type: 'discard', card: '2C' }));
-    expect(next.scores).toEqual([13, 11]);
+    const next = ok(turn(lastCard([3, 3]), 0, { type: 'discard', card: '2C' }));
+    expect(next.results[0].teams).toEqual([{ cards: 30, total: 1 }, { cards: 20, total: 0 }]);
+    expect(next.scores).toEqual([4, 3]);
     expect(next.status).toBe('handOver');
     expect(next.results).toHaveLength(1);
   });
 
   it('plays another hand while the leaders are tied at or above the target', () => {
-    const next = ok(turn(lastCard([18, 20]), 0, { type: 'discard', card: '2C' }));
-    expect(next.scores).toEqual([21, 21]);
+    const next = ok(turn(lastCard([6, 7]), 0, { type: 'discard', card: '2C' }));
+    expect(next.scores).toEqual([7, 7]);
     expect(next.status).toBe('handOver');
   });
 
   it('ends the match when one side leads at or above the target', () => {
-    const next = ok(turn(lastCard([19, 20]), 0, { type: 'discard', card: '2C' }));
-    expect(next.scores).toEqual([22, 21]);
+    const next = ok(turn(lastCard([6, 6]), 0, { type: 'discard', card: '2C' }));
+    expect(next.scores).toEqual([7, 6]);
     expect(next.status).toBe('finished');
     expect(next.winnerTeam).toBe(0);
   });
