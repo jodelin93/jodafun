@@ -4,8 +4,8 @@ export const shareMessages = defineMessages({
   en: {
     share: 'Share',
     shareOptions: 'Share the room link',
-    inviteText: 'Play Joda Memory with me! Room code {code}:',
-    emailSubject: 'Play Joda Memory with me',
+    inviteText: 'Play {game} with me! Room code {code}:',
+    emailSubject: 'Play {game} with me',
     whatsapp: 'WhatsApp',
     sms: 'Text message',
     email: 'Email',
@@ -14,8 +14,8 @@ export const shareMessages = defineMessages({
   fr: {
     share: 'Partager',
     shareOptions: 'Partager le lien de la salle',
-    inviteText: 'Viens jouer à Joda Memory avec moi ! Code de la salle {code} :',
-    emailSubject: 'Viens jouer à Joda Memory avec moi',
+    inviteText: 'Viens jouer à {game} avec moi ! Code de la salle {code} :',
+    emailSubject: 'Viens jouer à {game} avec moi',
     whatsapp: 'WhatsApp',
     sms: 'SMS',
     email: 'E-mail',
@@ -24,8 +24,8 @@ export const shareMessages = defineMessages({
   ht: {
     share: 'Pataje',
     shareOptions: 'Pataje lyen chanm nan',
-    inviteText: 'Vin jwe Joda Memory avè m! Kòd chanm nan se {code}:',
-    emailSubject: 'Vin jwe Joda Memory avè m',
+    inviteText: 'Vin jwe {game} avè m! Kòd chanm nan se {code}:',
+    emailSubject: 'Vin jwe {game} avè m',
     whatsapp: 'WhatsApp',
     sms: 'Mesaj tèks',
     email: 'Imèl',
@@ -34,8 +34,8 @@ export const shareMessages = defineMessages({
   es: {
     share: 'Compartir',
     shareOptions: 'Compartir el enlace de la sala',
-    inviteText: '¡Juega Joda Memory conmigo! Código de la sala {code}:',
-    emailSubject: 'Juega Joda Memory conmigo',
+    inviteText: '¡Juega {game} conmigo! Código de la sala {code}:',
+    emailSubject: 'Juega {game} conmigo',
     whatsapp: 'WhatsApp',
     sms: 'Mensaje de texto',
     email: 'Correo',

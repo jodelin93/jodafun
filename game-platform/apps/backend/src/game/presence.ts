@@ -4,6 +4,8 @@ import type { Difficulty, RoomMode } from './room-store';
 export const INVITE_TTL_MS = 30_000;
 const NAME_MAX_LENGTH = 20;
 
+export type InviteGame = 'joda-memory' | 'african-casino';
+
 // A socket that said it is available to receive game requests
 export interface PresenceEntry {
   socketId: string;
@@ -19,8 +21,10 @@ export interface Invite {
   fromId: string; // inviter socket id
   toId: string; // target socket id
   fromPlayerKey?: string;
+  game: InviteGame; // which game the request is for
   difficulty: Difficulty;
-  mode: RoomMode; // the kind of game the inviter asked for
+  mode: RoomMode; // Joda Memory: the kind of game the inviter asked for
+  roomId: string | null; // Casino: the inviter's room the target is asked to join
   expiresAt: number;
   timer: NodeJS.Timeout;
 }
@@ -51,6 +55,11 @@ export class PresenceState {
     return [...this.invites.values()].find(i => i.fromId === socketId);
   }
 
+  // Every pending invite this socket sent (Casino rooms can fill several seats at once)
+  outgoingAll(socketId: string): Invite[] {
+    return [...this.invites.values()].filter(i => i.fromId === socketId);
+  }
+
   incoming(socketId: string): Invite | undefined {
     return [...this.invites.values()].find(i => i.toId === socketId);
   }
@@ -67,6 +76,7 @@ export class PresenceState {
     difficulty: Difficulty,
     mode: RoomMode,
     onExpire: (invite: Invite) => void,
+    casinoRoomId: string | null = null,
   ): Invite {
     const id = randomUUID();
     const invite: Invite = {
@@ -74,8 +84,10 @@ export class PresenceState {
       fromId,
       toId,
       fromPlayerKey,
+      game: casinoRoomId ? 'african-casino' : 'joda-memory',
       difficulty,
       mode,
+      roomId: casinoRoomId,
       expiresAt: Date.now() + INVITE_TTL_MS,
       timer: setTimeout(() => {
         if (this.invites.get(id) !== invite) return;

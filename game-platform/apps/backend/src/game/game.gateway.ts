@@ -10,8 +10,11 @@ import {
 import { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveSessionUser, type SessionUser } from '../auth/session';
-import { RoomStore, type Difficulty, type GameRoom, type Player, type RoomMode } from './room-store';
+import type { SessionUser } from '../auth/session';
+import { RoomStore, isCasinoRoom, type Difficulty, type GameRoom, type Player, type RoomMode } from './room-store';
+import { SocketSessions } from './socket-sessions';
+import { CasinoService } from '../casino/casino.service';
+import { CASINO_GAME_TYPE } from '../casino/casino.types';
 import { RateLimiter, dealDeck, generateRoomCode, normalizeRoomCode } from './game.utils';
 import { PresenceState, presenceName, type PresenceEntry } from './presence';
 import {
@@ -57,8 +60,6 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   @WebSocketServer()
   server: Server;
 
-  // Session user per socket, resolved from the session cookie on connect (null = anonymous)
-  private socketUsers: Map<string, Promise<SessionUser | null>> = new Map();
   // Removal timers for disconnected players in their grace period
   private graceTimers: Map<Player, NodeJS.Timeout> = new Map();
   private flipLimiter = new RateLimiter(10, 1000);
@@ -73,13 +74,29 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   constructor(
     private prisma: PrismaService,
     private rooms: RoomStore,
-  ) {}
+    private sessions: SocketSessions,
+    private casino: CasinoService,
+  ) {
+    // Taking a Casino seat leaves the online list like any other seat; leaving one withdraws the
+    // Casino requests sent for it
+    this.casino.seatListener = {
+      seated: socketId => this.onSeated(socketId),
+      unseated: socketId => {
+        for (const invite of this.presence.outgoingAll(socketId).filter(i => i.game === CASINO_GAME_TYPE)) {
+          this.presence.removeInvite(invite);
+          this.server.to(invite.toId).emit('invite:cancelled', { inviteId: invite.id });
+        }
+        this.schedulePresenceChanged();
+      },
+    };
+  }
 
   // Rooms persisted by a previous process come back with every player disconnected
   async onModuleInit() {
     let restored: GameRoom[];
     try {
-      restored = await this.rooms.loadAll();
+      // Casino rooms are restored by CasinoService
+      restored = (await this.rooms.loadAll()).filter((room): room is GameRoom => !isCasinoRoom(room));
     } catch (error) {
       console.error('Failed to restore rooms from Redis:', error);
       return;
@@ -127,7 +144,7 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
       console.error(`Failed to read room ${roomId} from Redis:`, error);
       return null;
     });
-    if (!stored || (cached && stored.updatedAt <= cached.updatedAt)) return cached;
+    if (!stored || isCasinoRoom(stored) || (cached && stored.updatedAt <= cached.updatedAt)) return cached;
     cached?.players.forEach(player => this.clearGraceTimer(player));
     this.adoptRoom(stored, Date.now());
     // The adopted copy may hold seats that unlist someone
@@ -137,19 +154,12 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
-    this.socketUsers.set(
-      client.id,
-      resolveSessionUser(this.prisma, client.handshake.headers.cookie)
-        .catch(error => {
-          console.error(`Session lookup failed for ${client.id}:`, error);
-          return null;
-        }),
-    );
+    this.sessions.track(client);
   }
 
   handleDisconnect(client: Socket) {
     console.log(`Client disconnected: ${client.id}`);
-    this.socketUsers.delete(client.id);
+    this.sessions.forget(client.id);
     this.flipLimiter.forget(client.id);
     this.joinLimiter.forget(client.id);
     this.inviteLimiter.forget(client.id);
@@ -187,6 +197,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
   ) {
     if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
     const roomId = normalizeRoomCode(data?.roomId);
+    // A Casino room's code: the client opens the right game instead
+    if (this.rooms.gameTypeOf(roomId) === CASINO_GAME_TYPE) {
+      return { success: false, error: 'Wrong game', gameType: CASINO_GAME_TYPE };
+    }
     const room = await this.latestRoom(roomId);
     if (!room) {
       return { success: false, error: 'Room not found' };
@@ -362,6 +376,9 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (!this.joinLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
     const userId = await this.getSocketUserId(client.id);
     const roomId = normalizeRoomCode(data?.roomId);
+    if (this.rooms.gameTypeOf(roomId) === CASINO_GAME_TYPE) {
+      return { success: false, error: 'Wrong game', gameType: CASINO_GAME_TYPE };
+    }
     const room = await this.latestRoom(roomId);
 
     if (!room) {
@@ -1071,7 +1088,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
 
   @SubscribeMessage('invite:send')
   async handleInviteSend(
-    @MessageBody() data: { toId: string; playerKey: string; difficulty?: Difficulty; mode?: RoomMode },
+    @MessageBody()
+    data: { toId: string; playerKey: string; difficulty?: Difficulty; mode?: RoomMode; game?: string; roomId?: string },
     @ConnectedSocket() client: Socket,
   ) {
     if (!this.inviteLimiter.allow(client.id)) return TOO_MANY_REQUESTS;
@@ -1082,12 +1100,21 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     if (!target || target.socketId === client.id || (user && target.userId === user.id)) {
       return { success: false, error: 'Player not available' };
     }
-    // Accepting would fail anyway: a seated socket cannot be put in a new room
-    if (this.isSeated(client.id)) {
-      return { success: false, error: 'You are already in a room' };
-    }
-    if (this.presence.outgoing(client.id)) {
-      return { success: false, error: 'You already have a pending request' };
+    // Casino: the inviter sits in a room's lobby and asks people into its free seats, one request per seat
+    const casino = data?.game === CASINO_GAME_TYPE ? this.casino.inviteRoom(client.id, data.roomId) : null;
+    if (data?.game === CASINO_GAME_TYPE) {
+      if (!casino || casino.freeSeats === 0) return { success: false, error: 'Room is not open' };
+      if (this.presence.outgoingAll(client.id).length >= casino.freeSeats) {
+        return { success: false, error: 'You already have a pending request' };
+      }
+    } else {
+      // Accepting would fail anyway: a seated socket cannot be put in a new room
+      if (this.isSeated(client.id)) {
+        return { success: false, error: 'You are already in a room' };
+      }
+      if (this.presence.outgoing(client.id)) {
+        return { success: false, error: 'You already have a pending request' };
+      }
     }
     if (this.presence.incoming(target.socketId)) {
       return { success: false, error: 'They already have a request' };
@@ -1103,11 +1130,16 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         this.server.to(expired.fromId).emit('invite:expired', { inviteId: expired.id });
         this.server.to(expired.toId).emit('invite:expired', { inviteId: expired.id });
       },
+      casino?.room.id ?? null,
     );
+    // A Casino inviter is seated, so not on the online list: use the name they sit under
+    const seatName = casino?.room.players.find(p => p.socketId === client.id)?.name;
     this.server.to(target.socketId).emit('invite:received', {
       inviteId: invite.id,
-      from: { id: client.id, name: this.presenceNameOf(client.id, user) },
+      from: { id: client.id, name: seatName ?? this.presenceNameOf(client.id, user) },
+      game: invite.game,
       mode: invite.mode,
+      capacity: casino?.room.capacity,
       expiresAt: invite.expiresAt,
     });
     return { success: true, inviteId: invite.id, expiresAt: invite.expiresAt };
@@ -1133,6 +1165,10 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
         byName: this.presenceNameOf(client.id, user),
       });
       return { success: true };
+    }
+
+    if (invite.game === CASINO_GAME_TYPE && invite.roomId) {
+      return this.acceptCasinoInvite(invite.id, invite.fromId, invite.roomId, client, user, data.playerKey);
     }
 
     const inviterUser = await this.getSocketUser(invite.fromId);
@@ -1175,6 +1211,32 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     return { success: true, room: roomInfo };
   }
 
+  // A Casino request seats the target in the inviter's room, through the same checks as joining
+  // by link (capacity, game not started, one seat per account)
+  private async acceptCasinoInvite(
+    inviteId: string,
+    fromId: string,
+    roomId: string,
+    client: Socket,
+    user: SessionUser | null,
+    requestedKey: unknown,
+  ) {
+    // The inviter must still be in that room's lobby
+    if (!client.connected || this.isSeated(client.id) || !this.casino.inviteRoom(fromId, roomId)) {
+      this.server.to(fromId).emit('invite:expired', { inviteId });
+      return { success: false, error: 'Player no longer available' };
+    }
+    const playerKey = typeof requestedKey === 'string' && requestedKey ? requestedKey : this.presence.available.get(client.id)?.playerKey;
+    const joined = await this.casino.join(client.id, user, { roomId, name: this.presenceNameOf(client.id, user), playerKey });
+    if (!joined.ok) {
+      this.server.to(fromId).emit('invite:expired', { inviteId });
+      return { success: false, error: joined.code === 'ROOM_FULL' ? 'Room is full' : 'Player no longer available', code: joined.code };
+    }
+    this.onSeated(client.id);
+    this.server.to(fromId).emit('invite:accepted', { inviteId, game: CASINO_GAME_TYPE, roomId });
+    return { success: true, game: CASINO_GAME_TYPE, roomId };
+  }
+
   @SubscribeMessage('invite:cancel')
   handleInviteCancel(
     @MessageBody() data: { inviteId: string },
@@ -1197,11 +1259,11 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     const seatedSockets = new Set<string>();
     const heldKeys = new Set<string>();
     const heldUsers = new Set<string>();
-    for (const room of this.rooms.values()) {
+    for (const room of this.rooms.allRooms()) {
       for (const p of room.players) {
         seatedSockets.add(p.socketId);
         // An alternate seat is held for a day; while its player is away it doesn't hide them from the list
-        if (room.mode === 'alternate' && !p.connected) continue;
+        if (!isCasinoRoom(room) && room.mode === 'alternate' && !p.connected) continue;
         if (p.playerKey) heldKeys.add(p.playerKey);
         if (p.userId) heldUsers.add(p.userId);
       }
@@ -1215,8 +1277,9 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     );
   }
 
+  // Seated in a room of any game
   private isSeated(socketId: string): boolean {
-    for (const room of this.rooms.values()) {
+    for (const room of this.rooms.allRooms()) {
       if (room.players.some(p => p.socketId === socketId)) return true;
     }
     return false;
@@ -1402,8 +1465,8 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     return (await this.getSocketUser(socketId))?.id ?? null;
   }
 
-  private async getSocketUser(socketId: string): Promise<SessionUser | null> {
-    return (await this.socketUsers.get(socketId)) ?? null;
+  private getSocketUser(socketId: string): Promise<SessionUser | null> {
+    return this.sessions.user(socketId);
   }
 
   private sanitizeRoom(room: GameRoom) {

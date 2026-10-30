@@ -189,7 +189,7 @@ function Dashboard({ onPlay, loading }: { onPlay: () => void; loading: boolean }
           <h2 className="title-lg">{featured.title}</h2>
           <p className="mt-2 max-w-prose text-chalk">{t(featured.description)}</p>
           <ul className="mt-4 flex flex-wrap gap-2">
-            <li className="chip"><Users className="h-4 w-4" aria-hidden="true" />{t('playersRange', { range: featured.players })}</li>
+            <li className="chip"><Users className="h-4 w-4" aria-hidden="true" />{featured.playersLabel ? t(featured.playersLabel) : t('playersRange', { range: featured.players })}</li>
             <li className="chip"><Timer className="h-4 w-4" aria-hidden="true" />{t('durationRange', { range: featured.duration })}</li>
           </ul>
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -252,7 +252,9 @@ function GamesRow({ onPlay }: { onPlay: (game: Game) => void }) {
                   <div className="flex h-full flex-col p-4">
                     <game.Icon className="h-9 w-9 text-signal" strokeWidth={1.75} aria-hidden="true" />
                     <p className="mt-auto font-display text-lg font-extrabold leading-tight">{game.title}</p>
-                    <p className="mt-1 text-xs text-ink-soft">{t('playersRange', { range: game.players })}</p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {game.playersLabel ? t(game.playersLabel) : t('playersRange', { range: game.players })}
+                    </p>
                     <span className="btn-gold btn-sm mt-3 w-full">{t('play')}</span>
                   </div>
                 </PlayingCard>

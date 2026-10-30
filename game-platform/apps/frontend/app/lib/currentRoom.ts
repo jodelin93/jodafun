@@ -2,11 +2,14 @@
 // can get back while the server still holds their seat (5 minutes in the lobby, 60 seconds mid-game,
 // a day in an alternate room).
 
+import type { PlayableGameId } from './games';
+
 const KEY = 'joda-current-room';
 const CHANGE_EVENT = 'joda-current-room';
 const HOLD_MS = 5 * 60 * 1000;
 
-export type CurrentRoom = { roomId: string; savedAt: number; holdMs?: number };
+// Records saved before Joda Casino existed have no `game`; they are Joda Memory rooms
+export type CurrentRoom = { roomId: string; savedAt: number; holdMs?: number; game?: PlayableGameId };
 
 export function readCurrentRoom(): CurrentRoom | null {
   try {
@@ -19,15 +22,16 @@ export function readCurrentRoom(): CurrentRoom | null {
       localStorage.removeItem(KEY);
       return null;
     }
-    return value;
+    const game: PlayableGameId = value.game === 'african-casino' ? 'african-casino' : 'joda-memory';
+    return { roomId: value.roomId, savedAt: value.savedAt, holdMs, game };
   } catch {
     return null;
   }
 }
 
-export function saveCurrentRoom(roomId: string, holdMs = HOLD_MS) {
+export function saveCurrentRoom(roomId: string, holdMs = HOLD_MS, game: PlayableGameId = 'joda-memory') {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ roomId, savedAt: Date.now(), holdMs }));
+    localStorage.setItem(KEY, JSON.stringify({ roomId, savedAt: Date.now(), holdMs, game }));
     window.dispatchEvent(new Event(CHANGE_EVENT));
   } catch {
     // Storage can be unavailable (private mode); the return link is a convenience
@@ -53,4 +57,4 @@ export function subscribeCurrentRoom(onChange: () => void): () => void {
   };
 }
 
-export const roomPath = (roomId: string) => `/games/joda-memory?roomId=${roomId}`;
+export const roomPath = (roomId: string, game: PlayableGameId = 'joda-memory') => `/games/${game}?roomId=${roomId}`;

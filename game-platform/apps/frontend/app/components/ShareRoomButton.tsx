@@ -4,15 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Mail, MessageCircle, MessageSquareText, Share2 } from 'lucide-react';
 import { useT } from '../i18n/I18nProvider';
 import { shareMessages } from '../i18n/messages/share';
+import { GAME_TITLES, type PlayableGameId } from '../lib/games';
 
-type Props = { url: string; code: string; onCopy: () => void };
+type Props = { url: string; code: string; onCopy: () => void; game?: PlayableGameId };
 
 // Phones get the system share sheet (WhatsApp, Messages, Messenger, ...); browsers without one get a small menu
-export default function ShareRoomButton({ url, code, onCopy }: Props) {
+export default function ShareRoomButton({ url, code, onCopy, game = 'joda-memory' }: Props) {
   const t = useT(shareMessages);
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const text = t('inviteText', { code });
+  const title = GAME_TITLES[game];
+  const text = t('inviteText', { code, game: title });
   const message = encodeURIComponent(`${text} ${url}`);
 
   // Close the menu on outside click or Escape
@@ -35,7 +37,7 @@ export default function ShareRoomButton({ url, code, onCopy }: Props) {
   const share = async () => {
     if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({ title: 'Joda Memory', text, url });
+        await navigator.share({ title, text, url });
       } catch {
         // The player closed the share sheet; nothing to do
       }
@@ -64,7 +66,7 @@ export default function ShareRoomButton({ url, code, onCopy }: Props) {
           </a>
           <a
             role="menuitem"
-            href={`mailto:?subject=${encodeURIComponent(t('emailSubject'))}&body=${message}`}
+            href={`mailto:?subject=${encodeURIComponent(t('emailSubject', { game: title }))}&body=${message}`}
             className={itemClass}
             onClick={() => setOpen(false)}
           >

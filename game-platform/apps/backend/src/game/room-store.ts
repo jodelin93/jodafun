@@ -1,5 +1,7 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { CASINO_GAME_TYPE, type CasinoRoom } from '../casino/casino.types';
+import { restoreMatch } from '../casino/engine/match';
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
 // classic: both players share one board and take turns; alternate: each clears the same decks on their own board
@@ -46,6 +48,7 @@ export interface Player {
 }
 
 export interface GameRoom {
+  gameType?: 'joda-memory'; // missing on rooms saved before other games existed (= Joda Memory)
   id: string;
   hostId: string;
   players: Player[];
@@ -73,18 +76,28 @@ export interface GameRoom {
   updatedAt: number;
 }
 
+// Every game's rooms share one store and one code space; gameType tells them apart
+export type StoredRoom = GameRoom | CasinoRoom;
+export const isCasinoRoom = (room: StoredRoom | null | undefined): room is CasinoRoom =>
+  room?.gameType === CASINO_GAME_TYPE;
+
 const KEY_PREFIX = 'jodafun:room:';
 const TTL_SECONDS = 24 * 60 * 60;
 
-function serializeRoom(room: GameRoom): string {
+function serializeRoom(room: StoredRoom): string {
   // Dates become ISO strings; everything else is plain JSON
   return JSON.stringify(room);
 }
 
-function deserializeRoom(raw: string): GameRoom | null {
+function deserializeRoom(raw: string): StoredRoom | null {
   try {
     const room = JSON.parse(raw);
     if (typeof room?.id !== 'string' || !Array.isArray(room.players)) return null;
+    if (room.gameType === CASINO_GAME_TYPE) {
+      // A match that fails its card accounting is dropped rather than played on
+      if (room.match) room.match = restoreMatch(room.match);
+      return room as CasinoRoom;
+    }
     room.gameStartedAt = room.gameStartedAt ? new Date(room.gameStartedAt) : null;
     return room as GameRoom;
   } catch {
@@ -95,11 +108,13 @@ function deserializeRoom(raw: string): GameRoom | null {
 /**
  * Rooms live in memory (the cache every read hits). When REDIS_URL is set, every
  * save is also written to Redis so rooms survive a restart; Redis is only read at boot.
+ * This is a cache with persistence, not shared state: exactly one backend process owns the rooms.
  */
 @Injectable()
 export class RoomStore implements OnModuleDestroy {
-  private cache = new Map<string, GameRoom>();
+  private cache = new Map<string, StoredRoom>();
   private redis: Redis | null = null;
+  private loaded: Promise<StoredRoom[]> | null = null;
 
   constructor() {
     const url = process.env.REDIS_URL;
@@ -113,20 +128,42 @@ export class RoomStore implements OnModuleDestroy {
     return this.redis !== null;
   }
 
+  // Joda Memory rooms only; a Casino room's code is not a Memory room
   get(code: string): GameRoom | undefined {
-    return this.cache.get(code);
+    const room = this.cache.get(code);
+    return room && !isCasinoRoom(room) ? room : undefined;
   }
 
+  getCasino(code: string): CasinoRoom | undefined {
+    const room = this.cache.get(code);
+    return isCasinoRoom(room) ? room : undefined;
+  }
+
+  gameTypeOf(code: string): string | undefined {
+    const room = this.cache.get(code);
+    return room ? (room.gameType ?? 'joda-memory') : undefined;
+  }
+
+  // Any game's room: room codes are unique across games
   has(code: string): boolean {
     return this.cache.has(code);
   }
 
-  values(): IterableIterator<GameRoom> {
-    return this.cache.values();
+  // Joda Memory rooms only
+  values(): GameRoom[] {
+    return [...this.cache.values()].filter((room): room is GameRoom => !isCasinoRoom(room));
+  }
+
+  casinoRooms(): CasinoRoom[] {
+    return [...this.cache.values()].filter(isCasinoRoom);
+  }
+
+  allRooms(): StoredRoom[] {
+    return [...this.cache.values()];
   }
 
   // Call after every mutation; writes are sent in order on one connection
-  save(room: GameRoom) {
+  save(room: StoredRoom) {
     room.updatedAt = Date.now();
     this.cache.set(room.id, room);
     this.redis
@@ -142,14 +179,19 @@ export class RoomStore implements OnModuleDestroy {
   }
 
   // Reads one room straight from Redis, bypassing the cache (null without Redis)
-  async fetch(code: string): Promise<GameRoom | null> {
+  async fetch(code: string): Promise<StoredRoom | null> {
     if (!this.redis) return null;
     const raw = await this.redis.get(KEY_PREFIX + code);
     return raw ? deserializeRoom(raw) : null;
   }
 
-  // Loads every persisted room into the cache (boot only)
-  async loadAll(): Promise<GameRoom[]> {
+  // Loads every persisted room into the cache once (boot only); every caller gets the same list
+  loadAll(): Promise<StoredRoom[]> {
+    this.loaded ??= this.readAll();
+    return this.loaded;
+  }
+
+  private async readAll(): Promise<StoredRoom[]> {
     if (!this.redis) return [];
     const keys: string[] = [];
     let cursor = '0';
@@ -159,7 +201,7 @@ export class RoomStore implements OnModuleDestroy {
       cursor = next;
     } while (cursor !== '0');
 
-    const rooms: GameRoom[] = [];
+    const rooms: StoredRoom[] = [];
     for (let i = 0; i < keys.length; i += 200) {
       const values = await this.redis.mget(keys.slice(i, i + 200));
       for (const raw of values) {

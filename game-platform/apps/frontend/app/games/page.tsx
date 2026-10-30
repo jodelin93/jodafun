@@ -69,7 +69,7 @@ export default function GamesPage() {
                       <p className="mt-1 text-ink-soft">{t(game.description)}</p>
                       <p className="mt-4 flex items-center gap-2 text-sm text-ink-soft">
                         <Users className="h-4 w-4" aria-hidden="true" />
-                        {t('playersRange', { range: game.players })}
+                        {game.playersLabel ? t(game.playersLabel) : t('playersRange', { range: game.players })}
                       </p>
                       <p className="mt-1 flex items-center gap-2 text-sm text-ink-soft">
                         <Timer className="h-4 w-4" aria-hidden="true" />

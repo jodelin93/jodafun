@@ -38,6 +38,7 @@ model User {
   accounts          Account[]
   verifications     Verification[]
   soloRuns          SoloRun[]
+  gameParticipations GameParticipant[]
 
   @@index([username])
   @@index([email])
@@ -106,6 +107,8 @@ model Game {
   winner       User?         @relation("WinnerGames", fields: [winnerId], references: [id])
   rounds       GameRound[]
   matchHistory MatchHistory[]
+  participants GameParticipant[]
+  hands        GameHand[]
 
   @@index([roomCode])
   @@index([status])
@@ -199,4 +202,42 @@ model SoloRun {
   @@index([gameType, difficulty, timeSeconds])
   @@index([userId])
   @@map("solo_runs")
+}
+
+// Everyone who played a game, for games with more than two players or with teams (Joda Casino).
+// Joda Memory keeps using player1/player2 and match_history.
+model GameParticipant {
+  id     String  @id @default(uuid())
+  gameId String  @map("game_id")
+  userId String? @map("user_id")
+  seat   Int
+  team   Int
+  name   String  @db.VarChar(100) // display name when the game was played
+  result String  @db.VarChar(10) // win | loss
+  points Int     @default(0) // the team's match points
+
+  // Relations
+  game Game  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([gameId, seat])
+  @@index([userId])
+  @@map("game_participants")
+}
+
+// Hand-by-hand scores of a team game
+model GameHand {
+  id          String @id @default(uuid())
+  gameId      String @map("game_id")
+  handNumber  Int    @map("hand_number")
+  dealerSeat  Int    @map("dealer_seat")
+  pointsTeam0 Int    @map("points_team0")
+  pointsTeam1 Int    @map("points_team1")
+  breakdown   Json   @db.JsonB // per team: cards, spades and the points for each scoring item
+
+  // Relations
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, handNumber])
+  @@map("game_hands")
 }

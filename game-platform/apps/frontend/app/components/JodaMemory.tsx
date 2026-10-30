@@ -9,6 +9,7 @@ import SiteHeader from './ui/SiteHeader';
 import Logo from './ui/Logo';
 import { useAuth } from '../contexts/AuthContext';
 import { clearCurrentRoom, saveCurrentRoom } from '../lib/currentRoom';
+import type { PlayableGameId } from '../lib/games';
 import OnlinePlayers, { type InviteRoom } from './OnlinePlayers';
 import ShareRoomButton from './ShareRoomButton';
 import AlternateRoom, { AltOpponentLine, formatAltTime, type AltRoomState } from './AlternateRoom';
@@ -220,7 +221,7 @@ export default function JodaMemory() {
   const [showOnline, setShowOnline] = useState(false);
   // How many other players are listed as online right now
   const [othersOnline, setOthersOnline] = useState(0);
-  const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; mode: 'classic' | 'alternate'; expiresAt: number } | null>(null);
+  const [incomingInvite, setIncomingInvite] = useState<{ inviteId: string; fromName: string; mode: 'classic' | 'alternate'; expiresAt: number; game: PlayableGameId; capacity?: 2 | 4 } | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [inviteNow, setInviteNow] = useState(() => Date.now());
@@ -629,6 +630,11 @@ export default function JodaMemory() {
           applyReclaimedSeat(response, socket.id);
           return;
         }
+        // A Joda Casino room code: that page reclaims the seat itself
+        if (response?.gameType === 'african-casino') {
+          router.replace('/games/african-casino?roomId=' + currentRoomId);
+          return;
+        }
         // Opening a link we have no seat in: stay on the join step (and forget a room that no longer exists)
         if (!inRoom) {
           if (response && !response.success && /not found/i.test(response.error ?? '')) clearCurrentRoom();
@@ -657,7 +663,7 @@ export default function JodaMemory() {
     const refreshOthers = () =>
       socket.emit('presence:list', {}, (res: { players?: unknown[] }) => setOthersOnline(res?.players?.length ?? 0));
     socket.on('presence:changed', refreshOthers);
-    socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; mode?: 'classic' | 'alternate'; expiresAt: number }) => {
+    socket.on('invite:received', (data: { inviteId: string; from: { id: string; name: string }; mode?: 'classic' | 'alternate'; expiresAt: number; game?: PlayableGameId; capacity?: 2 | 4 }) => {
       setInviteError(null);
       setInviteNow(Date.now());
       setIncomingInvite({
@@ -665,6 +671,8 @@ export default function JodaMemory() {
         fromName: data.from?.name || '',
         mode: data.mode === 'alternate' ? 'alternate' : 'classic',
         expiresAt: data.expiresAt,
+        game: data.game === 'african-casino' ? 'african-casino' : 'joda-memory',
+        capacity: data.capacity,
       });
     });
     const dropInvite = (data: { inviteId: string }) =>
@@ -1206,9 +1214,15 @@ export default function JodaMemory() {
     const socket = socketRef.current;
     if (!socket || !incomingInvite) return;
     const { inviteId } = incomingInvite;
-    socket.emit('invite:respond', { inviteId, accept, playerKey: getPlayerKey() }, (res: { success: boolean; room?: InviteRoom; error?: string }) => {
+    socket.emit('invite:respond', { inviteId, accept, playerKey: getPlayerKey() }, (res: { success: boolean; room?: InviteRoom; game?: PlayableGameId; roomId?: string; error?: string }) => {
       if (!accept) {
         setIncomingInvite(null);
+        return;
+      }
+      // A Joda Casino request: the seat is ours, the Casino page sits us down with the same player key
+      if (res?.success && res.game === 'african-casino' && res.roomId) {
+        setIncomingInvite(null);
+        router.push('/games/african-casino?roomId=' + res.roomId);
         return;
       }
       if (res?.success && res.room) {
@@ -1278,6 +1292,11 @@ export default function JodaMemory() {
     try {
       const socket = socketRef.current;
       socket.emit('joinGame', { roomId: targetRoom, playerName: playerName.trim(), playerKey: getPlayerKey() }, (response: any) => {
+        // A Joda Casino room code: send the player to that game instead of showing an error
+        if (!response.success && response.gameType === 'african-casino') {
+          router.replace('/games/african-casino?roomId=' + targetRoom);
+          return;
+        }
         if (response.success && response.rejoined) {
           applyReclaimedSeat(response, socket.id);
           const url = new URL(window.location.href);
@@ -1679,9 +1698,11 @@ export default function JodaMemory() {
                 {t('wantsToPlay', { name: incomingInvite.fromName || t('aPlayer') })}
               </h2>
               <p className="mt-2 text-chalk">
-                {incomingInvite.mode === 'alternate'
-                  ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
-                  : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
+                {incomingInvite.game === 'african-casino'
+                  ? t(incomingInvite.capacity === 4 ? 'inviteBodyCasinoTeams' : 'inviteBodyCasino', { name: incomingInvite.fromName || t('aPlayer') })
+                  : incomingInvite.mode === 'alternate'
+                    ? ta('inviteBodyAlternate', { name: incomingInvite.fromName || t('aPlayer') })
+                    : t('inviteBody', { name: incomingInvite.fromName || t('aPlayer') })}{' '}
                 {gameStarted && gameMode === 'single' ? `${t('acceptingEndsSolo')} ` : ''}
                 {t('inviteExpiresIn', { seconds: Math.max(0, Math.ceil((incomingInvite.expiresAt - inviteNow) / 1000)) })}
               </p>
@@ -2728,7 +2749,7 @@ function SoloSaveStatus({
 }
 
 type RejoinResponse =
-  | { success: false; error?: string }
+  | { success: false; error?: string; gameType?: PlayableGameId }
   | {
       success: true;
       room: {

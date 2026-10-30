@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { formatTime, type Difficulty } from '../../lib/leaderboard';
+import { GAME_TITLES } from '../../lib/games';
 import type { UserStats } from '../../lib/users';
 import { useT } from '../../i18n/I18nProvider';
 import { profileMessages } from '../../i18n/messages/profile';
@@ -15,6 +16,19 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
     { label: t('bestStreak'), value: stats.bestStreak },
     { label: t('currentStreak'), value: stats.currentStreak },
   ];
+  // Its own section: Casino points are match points and never add up with Memory numbers
+  const casino = stats.casino;
+  const casinoFigures = casino
+    ? [
+        { label: t('games'), value: casino.gamesPlayed },
+        { label: t('wins'), value: casino.wins },
+        { label: t('winRate'), value: `${casino.winRate}%` },
+        { label: t('casinoGamesTwo'), value: casino.twoPlayer },
+        { label: t('casinoGamesFour'), value: casino.fourPlayer },
+        { label: t('pointsFor'), value: casino.pointsFor },
+        { label: t('pointsAgainst'), value: casino.pointsAgainst },
+      ]
+    : [];
   return (
     <>
       <section aria-labelledby="stats-h" className="mt-8">
@@ -66,6 +80,23 @@ export default function StatsSection({ stats, canPlay }: { stats: UserStats; can
           })}
         </ul>
       </section>
+
+      {casino && (
+        <section aria-labelledby="casino-h" className="mt-8">
+          <h2 id="casino-h" className="title-md">
+            {GAME_TITLES['african-casino']}
+          </h2>
+          <dl className="panel mt-3 grid grid-cols-2 gap-x-4 gap-y-4 p-4 sm:grid-cols-4 sm:p-5">
+            {casinoFigures.map((f) => (
+              <div key={f.label}>
+                <dt className="text-sm text-chalk">{f.label}</dt>
+                <dd className="font-display text-2xl font-bold">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-2 text-sm text-chalk">{t('casinoPointsNote')}</p>
+        </section>
+      )}
     </>
   );
 }

@@ -6,6 +6,19 @@ export interface SoloBest {
   runs: number;
 }
 
+// Joda Casino results; points are match points and never mix with Joda Memory numbers
+export interface CasinoStats {
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  twoPlayer: number;
+  fourPlayer: number;
+  pointsFor: number;
+  pointsAgainst: number;
+}
+
+// Top-level fields are Joda Memory games with friends
 export interface UserStats {
   gamesPlayed: number;
   wins: number;
@@ -16,6 +29,7 @@ export interface UserStats {
   currentStreak: number;
   bestStreak: number;
   solo: Record<Difficulty, SoloBest | null>;
+  casino?: CasinoStats;
 }
 
 export interface PublicProfile {
@@ -40,6 +54,29 @@ export interface HistoryItem {
 
 export interface HistoryPage {
   items: HistoryItem[];
+  nextCursor: string | null;
+}
+
+export interface CasinoPlayer {
+  name: string;
+}
+
+export interface CasinoHistoryItem {
+  id: string;
+  playedAt: string;
+  result: 'win' | 'loss';
+  players: 2 | 4;
+  targetPoints: number | null;
+  hands: number | null;
+  forfeit: boolean;
+  teamPoints: number;
+  opponentPoints: number;
+  teammates: CasinoPlayer[];
+  opponents: CasinoPlayer[];
+}
+
+export interface CasinoHistoryPage {
+  items: CasinoHistoryItem[];
   nextCursor: string | null;
 }
 
@@ -74,6 +111,12 @@ export function fetchMyHistory(cursor: string | null, signal?: AbortSignal) {
   const q = new URLSearchParams({ limit: '20' });
   if (cursor) q.set('cursor', cursor);
   return getJson<HistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
+}
+
+export function fetchMyCasinoHistory(cursor: string | null, signal?: AbortSignal) {
+  const q = new URLSearchParams({ game: 'african-casino', limit: '20' });
+  if (cursor) q.set('cursor', cursor);
+  return getJson<CasinoHistoryPage>(`/api/users/me/history?${q.toString()}`, signal);
 }
 
 export const fetchProfile = (id: string, signal?: AbortSignal) =>

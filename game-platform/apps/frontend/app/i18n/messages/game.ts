@@ -26,6 +26,8 @@ export const gameMessages = defineMessages({
     // Incoming request
     wantsToPlay: '{name} wants to play',
     inviteBody: 'Joda Memory, you against {name}.',
+    inviteBodyCasino: '{name} invites you to a game of Joda Casino.',
+    inviteBodyCasinoTeams: '{name} invites you to a four-player game of Joda Casino, in two teams.',
     acceptingEndsSolo: 'Accepting ends your solo game.',
     inviteExpiresIn: 'This request expires in {seconds}s.',
     accept: 'Accept',
@@ -239,6 +241,8 @@ export const gameMessages = defineMessages({
 
     wantsToPlay: '{name} veut jouer',
     inviteBody: 'Joda Memory, vous contre {name}.',
+    inviteBodyCasino: '{name} vous invite à une partie de Joda Casino.',
+    inviteBodyCasinoTeams: '{name} vous invite à une partie de Joda Casino à quatre, en deux équipes.',
     acceptingEndsSolo: 'Accepter met fin à votre partie en solo.',
     inviteExpiresIn: 'Cette demande expire dans {seconds} s.',
     accept: 'Accepter',
@@ -441,6 +445,8 @@ export const gameMessages = defineMessages({
 
     wantsToPlay: '{name} vle jwe',
     inviteBody: 'Joda Memory, ou kont {name}.',
+    inviteBodyCasino: '{name} envite w jwe yon pati Joda Casino.',
+    inviteBodyCasinoTeams: '{name} envite w jwe yon pati Joda Casino a kat, an de ekip.',
     acceptingEndsSolo: 'Si w aksepte, jwèt solo ou a ap fini.',
     inviteExpiresIn: 'Demann sa a ap ekspire nan {seconds}s.',
     accept: 'Aksepte',
@@ -643,6 +649,8 @@ export const gameMessages = defineMessages({
 
     wantsToPlay: '{name} quiere jugar',
     inviteBody: 'Joda Memory, tú contra {name}.',
+    inviteBodyCasino: '{name} te invita a una partida de Joda Casino.',
+    inviteBodyCasinoTeams: '{name} te invita a una partida de Joda Casino a cuatro, en dos equipos.',
     acceptingEndsSolo: 'Si aceptas, termina tu partida en solitario.',
     inviteExpiresIn: 'Esta solicitud vence en {seconds} s.',
     accept: 'Aceptar',

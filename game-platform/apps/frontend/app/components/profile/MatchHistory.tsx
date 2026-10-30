@@ -1,39 +1,107 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useGuestPlay } from '../../lib/useGuestPlay';
 import { useLocale, useT } from '../../i18n/I18nProvider';
 import { profileMessages } from '../../i18n/messages/profile';
-import { fetchMyHistory, relativeDate, UnauthorizedError, type HistoryItem } from '../../lib/users';
+import { GAME_TITLES, type PlayableGameId } from '../../lib/games';
+import {
+  fetchMyCasinoHistory,
+  fetchMyHistory,
+  relativeDate,
+  UnauthorizedError,
+  type CasinoHistoryItem,
+  type CasinoPlayer,
+  type HistoryItem,
+} from '../../lib/users';
 
-function HistoryRow({ g }: { g: HistoryItem }) {
+const HISTORY_GAMES: PlayableGameId[] = ['joda-memory', 'african-casino'];
+
+function ResultChips({ won, forfeit }: { won: boolean; forfeit: boolean }) {
   const t = useT(profileMessages);
-  const { intlLocale } = useLocale();
-  const won = g.result === 'win';
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
+    <>
       <span
         className={`chip px-2.5 py-0.5 font-semibold ${won ? 'bg-gold/10 text-white ring-2 ring-gold' : ''}`}
       >
         {won ? t('win') : t('loss')}
       </span>
-      {g.forfeit && <span className="chip px-2.5 py-0.5">{t('forfeit')}</span>}
+      {forfeit && <span className="chip px-2.5 py-0.5">{t('forfeit')}</span>}
+    </>
+  );
+}
+
+function PlayedAt({ iso }: { iso: string }) {
+  const t = useT(profileMessages);
+  const { intlLocale } = useLocale();
+  return (
+    <time dateTime={iso} title={new Date(iso).toLocaleString(intlLocale)} className="w-full text-xs text-chalk sm:w-auto">
+      {relativeDate(iso, intlLocale, t('justNow'))}
+    </time>
+  );
+}
+
+function HistoryRow({ g }: { g: HistoryItem }) {
+  const t = useT(profileMessages);
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
+      <ResultChips won={g.result === 'win'} forfeit={g.forfeit} />
       <span className="min-w-0 flex-1 break-words font-semibold">{g.opponentName ?? t('anonymousPlayer')}</span>
       <span className="text-sm text-chalk">
         {t('score', { won: g.roundsWon, lost: g.roundsLost })}
         {g.difficulty ? `, ${g.difficulty === 'easy' || g.difficulty === 'medium' || g.difficulty === 'hard' ? t(g.difficulty) : g.difficulty}` : ''}
       </span>
-      <time dateTime={g.playedAt} title={new Date(g.playedAt).toLocaleString(intlLocale)} className="w-full text-xs text-chalk sm:w-auto">
-        {relativeDate(g.playedAt, intlLocale, t('justNow'))}
-      </time>
+      <PlayedAt iso={g.playedAt} />
     </li>
   );
 }
 
-export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () => void }) {
+function CasinoRow({ g }: { g: CasinoHistoryItem }) {
+  const t = useT(profileMessages);
+  // "Ana", "Ana and Ben", "Ana, Ben and Cy"
+  const names = (players: CasinoPlayer[]) => {
+    const list = players.map((p) => p.name || t('anonymousPlayer'));
+    if (list.length < 2) return list[0] ?? t('anonymousPlayer');
+    return t('namesAnd', { rest: list.slice(0, -1).join(', '), last: list[list.length - 1]! });
+  };
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
+      <ResultChips won={g.result === 'win'} forfeit={g.forfeit} />
+      <span className="chip px-2.5 py-0.5">{t('casinoPlayers', { n: g.players })}</span>
+      <span className="min-w-0 flex-1 break-words">
+        {g.players === 4 && g.teammates.length > 0 && (
+          <span className="text-chalk">{t('casinoWith', { names: names(g.teammates) })} </span>
+        )}
+        <span className="font-semibold">{t('casinoVs', { names: names(g.opponents) })}</span>
+      </span>
+      <span className="text-sm text-chalk">
+        <span aria-hidden="true">
+          {g.teamPoints}–{g.opponentPoints}
+        </span>
+        <span className="sr-only">{t('casinoScoreSr', { for: g.teamPoints, against: g.opponentPoints })}</span>
+      </span>
+      <PlayedAt iso={g.playedAt} />
+    </li>
+  );
+}
+
+// One game's history: its own loading, empty, error and "load more" states
+function HistoryList<T extends { id: string }>({
+  fetchPage,
+  renderRow,
+  emptyText,
+  playPath,
+  onUnauthorized,
+}: {
+  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<{ items: T[]; nextCursor: string | null }>;
+  renderRow: (item: T) => ReactNode;
+  emptyText: string;
+  playPath: string;
+  onUnauthorized: () => void;
+}) {
   const t = useT(profileMessages);
   const { play, loading: starting, error: playError } = useGuestPlay();
-  const [items, setItems] = useState<HistoryItem[] | null>(null);
+  const [items, setItems] = useState<T[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [more, setMore] = useState(false);
@@ -47,7 +115,7 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
       controller.current = c;
       setFailed(false);
       setMore(from !== null);
-      fetchMyHistory(from, c.signal)
+      fetchPage(from, c.signal)
         .then((page) => {
           setItems((prev) => (from ? [...(prev ?? []), ...page.items] : page.items));
           setCursor(page.nextCursor);
@@ -61,7 +129,7 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
           setMore(false);
         });
     },
-    [onUnauthorized],
+    [fetchPage, onUnauthorized],
   );
 
   useEffect(() => {
@@ -70,10 +138,7 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
   }, [load, attempt]);
 
   return (
-    <section aria-labelledby="hist-h" className="mt-8">
-      <h2 id="hist-h" className="title-md">
-        {t('matchHistory')}
-      </h2>
+    <>
       {failed && (
         <div className="panel mt-3 max-w-xl p-5" role="alert">
           <p className="text-chalk">{t('historyLoadFailed')}</p>
@@ -99,8 +164,8 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
       )}
       {items && items.length === 0 && !failed && (
         <div className="panel mt-3 max-w-xl p-5 sm:p-6">
-          <p className="text-chalk">{t('noGamesYet')}</p>
-          <button type="button" className="btn-gold mt-4" disabled={starting} onClick={() => play('/games/joda-memory')}>
+          <p className="text-chalk">{emptyText}</p>
+          <button type="button" className="btn-gold mt-4" disabled={starting} onClick={() => play(playPath)}>
             {t('startGame')}
           </button>
           {playError && (
@@ -112,11 +177,7 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
       )}
       {items && items.length > 0 && (
         <div className="panel mt-3 overflow-hidden">
-          <ul className="divide-y divide-table-rim">
-            {items.map((g) => (
-              <HistoryRow key={g.id} g={g} />
-            ))}
-          </ul>
+          <ul className="divide-y divide-table-rim">{items.map(renderRow)}</ul>
         </div>
       )}
       {items && items.length > 0 && cursor && !failed && (
@@ -124,6 +185,93 @@ export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () =>
           {more ? t('loading') : t('loadMore')}
         </button>
       )}
+    </>
+  );
+}
+
+export default function MatchHistory({ onUnauthorized }: { onUnauthorized: () => void }) {
+  const t = useT(profileMessages);
+  const [game, setGame] = useState<PlayableGameId>('joda-memory');
+  // A game's list loads the first time its tab opens, then stays mounted so switching back keeps its pages
+  const [opened, setOpened] = useState<PlayableGameId[]>(['joda-memory']);
+  const tabRefs = useRef<Partial<Record<PlayableGameId, HTMLButtonElement | null>>>({});
+
+  const select = (id: PlayableGameId) => {
+    setGame(id);
+    setOpened((list) => (list.includes(id) ? list : [...list, id]));
+  };
+
+  // Arrow keys move between tabs, as in any tab list
+  const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = HISTORY_GAMES.indexOf(game);
+    let next: number | null = null;
+    if (e.key === 'ArrowRight') next = (i + 1) % HISTORY_GAMES.length;
+    if (e.key === 'ArrowLeft') next = (i - 1 + HISTORY_GAMES.length) % HISTORY_GAMES.length;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = HISTORY_GAMES.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    const id = HISTORY_GAMES[next]!;
+    select(id);
+    tabRefs.current[id]?.focus();
+  };
+
+  return (
+    <section aria-labelledby="hist-h" className="mt-8">
+      <h2 id="hist-h" className="title-md">
+        {t('matchHistory')}
+      </h2>
+      <div
+        role="tablist"
+        aria-label={t('historyGame')}
+        onKeyDown={onTabKey}
+        className="mt-3 inline-flex rounded-full bg-white/5 p-1 ring-1 ring-inset ring-white/10"
+      >
+        {HISTORY_GAMES.map((id) => {
+          const active = id === game;
+          return (
+            <button
+              key={id}
+              ref={(el) => {
+                tabRefs.current[id] = el;
+              }}
+              type="button"
+              role="tab"
+              id={`hist-tab-${id}`}
+              aria-selected={active}
+              aria-controls={`hist-panel-${id}`}
+              tabIndex={active ? 0 : -1}
+              onClick={() => select(id)}
+              className={`min-h-11 rounded-full px-4 text-sm font-semibold transition ${
+                active ? 'bg-gold text-ink' : 'text-chalk hover:text-white'
+              }`}
+            >
+              {GAME_TITLES[id]}
+            </button>
+          );
+        })}
+      </div>
+      {HISTORY_GAMES.filter((id) => opened.includes(id)).map((id) => (
+        <div key={id} role="tabpanel" id={`hist-panel-${id}`} aria-labelledby={`hist-tab-${id}`} hidden={id !== game}>
+          {id === 'african-casino' ? (
+            <HistoryList
+              fetchPage={fetchMyCasinoHistory}
+              renderRow={(g) => <CasinoRow key={g.id} g={g} />}
+              emptyText={t('noCasinoGamesYet')}
+              playPath="/games/african-casino"
+              onUnauthorized={onUnauthorized}
+            />
+          ) : (
+            <HistoryList
+              fetchPage={fetchMyHistory}
+              renderRow={(g) => <HistoryRow key={g.id} g={g} />}
+              emptyText={t('noGamesYet')}
+              playPath="/games/joda-memory"
+              onUnauthorized={onUnauthorized}
+            />
+          )}
+        </div>
+      ))}
     </section>
   );
 }

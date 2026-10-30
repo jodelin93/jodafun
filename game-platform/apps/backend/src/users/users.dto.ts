@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 
 // Trim, NFC-normalise (so "ë" counts as one character) and collapse inner whitespace
 function normaliseName({ value }: { value: unknown }) {
@@ -27,4 +27,9 @@ export class HistoryQueryDto {
   @IsOptional()
   @Matches(/^([1-9]|[1-4][0-9]|50)$/, { message: 'limit must be an integer between 1 and 50' })
   limit?: string;
+
+  // Which game's history; Joda Memory when left out, as before
+  @IsOptional()
+  @IsIn(['joda-memory', 'african-casino'])
+  game?: string;
 }

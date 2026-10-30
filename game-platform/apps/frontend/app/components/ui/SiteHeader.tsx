@@ -42,7 +42,10 @@ export default function SiteHeader() {
     const update = () => {
       const room = readCurrentRoom();
       const params = new URLSearchParams(window.location.search);
-      const insideIt = window.location.pathname === '/games/joda-memory' && params.get('roomId')?.toUpperCase() === room?.roomId;
+      const insideIt =
+        room !== null &&
+        window.location.pathname === `/games/${room.game ?? 'joda-memory'}` &&
+        params.get('roomId')?.toUpperCase() === room.roomId;
       setOpenRoom(room && !insideIt ? room : null);
     };
     update();
@@ -126,7 +129,7 @@ export default function SiteHeader() {
               <span className="font-display font-bold tracking-[0.15em] text-white">{openRoom.roomId}</span> {t('roomPost')}
             </p>
             <div className="flex shrink-0 items-center gap-1">
-              <Link href={roomPath(openRoom.roomId)} className="btn-gold btn-sm">
+              <Link href={roomPath(openRoom.roomId, openRoom.game)} className="btn-gold btn-sm">
                 {t('returnToRoom')}
               </Link>
               <button

@@ -1,8 +1,17 @@
 import type { LucideIcon } from 'lucide-react';
 import type { homeMessages } from '../i18n/messages/home';
-import { Brain, ChessKnight, Grid3x3, WholeWord, Lightbulb, Palette } from 'lucide-react';
+import { Brain, ChessKnight, Grid3x3, WholeWord, Lightbulb, Palette, Spade } from 'lucide-react';
 
 type MessageKey = keyof (typeof homeMessages)['en'];
+
+// Games with a real page and rooms behind them
+export type PlayableGameId = 'joda-memory' | 'african-casino';
+
+// Proper names, never translated
+export const GAME_TITLES: Record<PlayableGameId, string> = {
+  'joda-memory': 'Joda Memory',
+  'african-casino': 'Joda Casino',
+};
 
 export type Game = {
   id: string;
@@ -11,6 +20,8 @@ export type Game = {
   Icon: LucideIcon;
   // Ranges only ("1–2", "5–15"); the labels around them are translated where shown
   players: string;
+  // Shown instead of the range when the count isn't one ("2 or 4 players")
+  playersLabel?: MessageKey;
   duration: string;
   tags: MessageKey[];
   available: boolean;
@@ -26,6 +37,17 @@ export const GAMES: Game[] = [
     players: '1–2',
     duration: '5–15',
     tags: ['tagMemory', 'tagCards', 'tagMultiplayer'],
+    available: true,
+  },
+  {
+    id: 'african-casino',
+    title: 'Joda Casino',
+    description: 'descCasino',
+    Icon: Spade,
+    players: '2–4',
+    playersLabel: 'playersTwoOrFour',
+    duration: '20–40',
+    tags: ['tagCards', 'tagStrategy', 'tagTeams'],
     available: true,
   },
   {
