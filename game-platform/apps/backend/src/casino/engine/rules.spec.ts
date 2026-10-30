@@ -132,11 +132,21 @@ describe('single builds', () => {
     expect(next.builds).toEqual([expect.objectContaining({ value: 10, owner: 0 })]);
   });
 
-  it('builds with a hand card (pagat: 4 and 5 on the table, play a 5 for 14 holding an ace)', () => {
-    const state = scenario({ hands: [['5H', 'AC'], ['KD']], loose: ['4S', '5D'] });
-    expect(ok(turn(state, 0, { type: 'build', hand: '5H', loose: ['4S', '5D'] })).builds[0]).toEqual(
+  it('builds a hand card with exactly one table card, never with more (house rule)', () => {
+    const state = scenario({ hands: [['5H', 'AC'], ['KD']], loose: ['4S', '5D', '9S'] });
+    expect(errorOf(turn(state, 0, { type: 'build', hand: '5H', loose: ['4S', '5D'] }))).toBe('BUILD_ONE_TABLE_CARD');
+    expect(ok(turn(state, 0, { type: 'build', hand: '5H', loose: ['9S'] })).builds[0]).toEqual(
       expect.objectContaining({ value: 14, owner: 0 }),
     );
+  });
+
+  it('never lets a build be worth more than 14', () => {
+    const table = scenario({ hands: [['2C', 'AC'], ['KD']], loose: ['9S', '6D'] });
+    expect(errorOf(turn(table, 0, { type: 'build', loose: ['9S', '6D'] }, { type: 'discard', card: '2C' }))).toBe('VALUE_TOO_HIGH');
+    const hand = scenario({ hands: [['7H', 'AC'], ['KD']], loose: ['8S'] });
+    expect(errorOf(turn(hand, 0, { type: 'build', hand: '7H', loose: ['8S'] }))).toBe('VALUE_TOO_HIGH');
+    const change = scenario({ hands: [['5H', 'AC'], ['KD']], loose: [], builds: [single('b1', ['6C', '4D'], 10, 1)] });
+    expect(errorOf(turn(change, 0, { type: 'change', build: 'b1', card: '5H' }))).toBe('VALUE_TOO_HIGH');
   });
 
   it('requires keeping a card that captures the build', () => {

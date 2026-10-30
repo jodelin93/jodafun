@@ -249,6 +249,8 @@ function build(w: Work, a: BuildAction) {
   if (a.hand) playFromHand(w, a.hand, 'build');
   const cards = a.hand ? [...a.loose, a.hand] : [...a.loose];
   if (cards.length < 2) fail('BUILD_TOO_SMALL');
+  // House rule: table cards only, or one hand card with exactly one table card
+  if (a.hand && a.loose.length > 1) fail('BUILD_ONE_TABLE_CARD');
   const value = sum(cards);
   if (value > 14) fail('VALUE_TOO_HIGH', { value });
   checkValueFree(w, value);

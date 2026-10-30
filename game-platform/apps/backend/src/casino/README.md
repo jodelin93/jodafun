@@ -56,8 +56,9 @@ Builds
   build is two or more sets with the same value. Values run 1–14.
 - Each build has an owner. Only one build of a given value can be on the table. A build can't be
   split, and two builds can't be combined into a higher value.
-- Creating a single build: from loose cards, optionally with one hand card. The builder must keep a
-  card that captures it. Capture-pile cards can't be used. If your side already owns a build of
+- Creating a single build: from loose cards only, or (house rule) one hand card with exactly one
+  loose card; a hand card with two or more loose cards is refused (`BUILD_ONE_TABLE_CARD`). No build
+  is ever worth more than 14 (`VALUE_TOO_HIGH`). The builder must keep a card that captures it. Capture-pile cards can't be used. If your side already owns a build of
   that value, add the set to it instead (the engine asks you to).
 - Changing a value: only an opponent's single build, only by adding one hand card, and only if you
   keep a card matching the new value. You become the owner. Augmented builds never change value.
