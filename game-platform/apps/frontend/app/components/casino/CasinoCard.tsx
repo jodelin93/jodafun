@@ -1,6 +1,7 @@
 'use client';
 
 import { cardInfo } from '../../lib/casino/cards';
+import CardFace from './CardFace';
 import { useT } from '../../i18n/I18nProvider';
 import { casinoMessages } from '../../i18n/messages/casino';
 
@@ -30,26 +31,18 @@ type Props = {
   label?: string; // overrides the spoken name
 };
 
-// A playing card face: cream stock, rank and suit in the corner and the suit large in the middle
+// A classic playing card (see CardFace) on cream stock
 export default function CasinoCard({ id, size = 'md', selected, used, onClick, disabled, label }: Props) {
   const t = useT(casinoMessages);
   const name = useCardName();
-  const c = cardInfo(id);
-  const color = c.red ? 'text-signal' : 'text-ink';
   const spoken = [label ?? name(id), selected ? t('selected') : '', used ? t('usedThisTurn') : ''].filter(Boolean).join(', ');
   const face = (
     <span
-      className={`relative flex h-full w-full flex-col rounded-lg bg-card p-1 font-display font-bold shadow-rest ring-1 ring-black/10 transition ${color} ${
+      className={`relative block h-full w-full overflow-hidden rounded-lg bg-card font-display shadow-rest ring-1 ring-black/10 transition ${
         selected ? '-translate-y-1.5 ring-[3px] ring-gold' : ''
       } ${used ? 'opacity-40' : ''}`}
     >
-      <span className="leading-none">
-        {c.label}
-        <span className="ml-px">{c.symbol}</span>
-      </span>
-      <span className="m-auto text-[1.6em] leading-none" aria-hidden="true">
-        {c.symbol}
-      </span>
+      <CardFace id={id} />
     </span>
   );
   if (!onClick) {
