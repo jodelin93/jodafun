@@ -1,6 +1,7 @@
 import type { PrivateMatchView, PublicMatchView } from './engine/match';
 import type { CasinoResult } from './casino-results';
 import type { HandResult, MatchState, RuleError, RuleErrorCode } from './engine/types';
+import type { PauseView, RoomPause } from '../game/team-room';
 
 export const CASINO_GAME_TYPE = 'african-casino';
 
@@ -54,6 +55,7 @@ export interface CasinoRoom {
   matchStartedAt: number | null;
   matchPlayers: CasinoMatchPlayer[] | null;
   outcome: CasinoOutcome | null;
+  paused?: RoomPause | null; // missing on rooms saved before pausing existed
   pendingResults: CasinoResult[]; // finished matches not yet written to the database
   processed: Record<string, ProcessedRequest[]>; // by player id
   createdAt: number;
@@ -78,7 +80,9 @@ export type CasinoErrorCode =
   | 'STALE_STATE'
   | 'BAD_REQUEST_ID'
   | 'RATE_LIMITED'
-  | 'NOT_FINISHED';
+  | 'NOT_FINISHED'
+  | 'PAUSED' // a move while the match is paused
+  | 'NOT_PAUSER' // resume asked by someone other than whoever paused, while they are still here;
 
 export type CasinoAck<T = object> =
   | ({ ok: true } & T)
@@ -100,6 +104,7 @@ export interface CasinoRoomView {
   seats: PublicSeat[];
   match: PublicMatchView | null;
   outcome: CasinoOutcome | null;
+  paused: PauseView | null;
 }
 
 // casino:private, sent to one player only

@@ -4,7 +4,7 @@ import type { SessionUser } from '../auth/session';
 import { RoomStore } from '../game/room-store';
 import { generateRoomCode, normalizeRoomCode } from '../game/game.utils';
 import { presenceName } from '../game/presence';
-import type { SeatListener, TeamRoomGame } from '../game/team-room';
+import { canResume, pauseView, type SeatListener, type TeamRoomGame } from '../game/team-room';
 import { secureRandomInt, type RandomInt } from '../lib/random';
 import { createMatch, forfeitMatch, parseMove, pass, playTile, playersFor, privateView, publicView, teamOf } from './engine/match';
 import { DEFAULT_TARGET_SCORE, MAX_TARGET_SCORE, MIN_TARGET_SCORE } from './engine/rules';
@@ -263,6 +263,28 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     });
   }
 
+  // Freezes the match: no tile is placed and nobody passes until it is resumed
+  pause(socketId: string, input: { roomId?: unknown }) {
+    return this.asPlayer(socketId, input.roomId, (room, player) => {
+      if (room.status !== 'playing' || !room.match) return fail('NOT_PLAYING');
+      if (!room.paused) {
+        room.paused = { by: player.id, at: Date.now() };
+        this.changed(room);
+      }
+      return { ok: true as const };
+    });
+  }
+
+  resume(socketId: string, input: { roomId?: unknown }) {
+    return this.asPlayer(socketId, input.roomId, (room, player) => {
+      if (!room.paused) return { ok: true as const };
+      if (!canResume(room.paused, player.id, room.players)) return fail('NOT_PAUSER');
+      room.paused = null;
+      this.changed(room);
+      return { ok: true as const };
+    });
+  }
+
   // --- Play ---
 
   play(socketId: string, input: { roomId?: unknown; version?: unknown; requestId?: unknown; tile?: unknown; end?: unknown }) {
@@ -334,6 +356,7 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
       }),
       match: room.match ? publicView(room.match) : null,
       outcome: room.outcome,
+      paused: room.status === 'playing' ? pauseView(room.paused, room.players) : null,
     };
   }
 
@@ -361,6 +384,8 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
 
       const match = room.match;
       if (room.status !== 'playing' || !match) return fail('NOT_PLAYING');
+      // Not remembered: the same request goes through once the match is resumed
+      if (room.paused) return fail('PAUSED');
       if (input.version !== match.version) return fail('STALE_STATE', { version: match.version });
       let ack: DominoAck<{ version: number }>;
       const result = apply(room, player.seat);
@@ -384,6 +409,7 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     room.match = createMatch({ mode: room.mode, targetScore: room.targetScore }, this.random, randomUUID());
     room.matchPlayers = room.players.map(p => ({ id: p.id, name: p.name, userId: p.userId, seat: p.seat }));
     room.outcome = null;
+    room.paused = null;
     room.processed = {};
     room.players.forEach(p => (p.isReady = false));
     console.log(`Dominoes match ${room.match.matchId} started in room ${room.id}`);
@@ -404,6 +430,7 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
 
   private finishMatch(room: DominoRoom) {
     room.status = 'finished';
+    room.paused = null;
     room.outcome = this.outcomeOf(room, null);
     this.recordResult(room);
   }
@@ -415,6 +442,7 @@ export class DominoesService implements OnModuleInit, OnModuleDestroy, TeamRoomG
     this.clearGraceTimer(player);
     const match = room.match;
     if (room.status === 'playing' && match) {
+      room.paused = null;
       if (match.turnsPlayed > 0) {
         room.match = forfeitMatch(match, teamOf(match, player.seat));
         room.status = 'finished';

@@ -375,4 +375,23 @@ describe('Casino results', () => {
     expect(results.saved[0].outcome).toEqual(expect.objectContaining({ forfeit: true, forfeitTeam: 1, winnerTeam: 0 }));
     expect(roomOf(store, roomId).status).toBe('lobby');
   });
+
+  it('freezes turns while paused; only whoever paused resumes while they are here', async () => {
+    const { service, store, emitter } = setup();
+    const roomId = await startedRoom(service, 2);
+    const room = roomOf(store, roomId);
+    const seat = room.match!.turn;
+    const socket = room.players.find(p => p.seat === seat)!.socketId;
+    const other = room.players.find(p => p.seat !== seat)!.socketId;
+    expect(await service.pause(other, { roomId })).toEqual({ ok: true });
+    expect(emitter.room.get(roomId)!.paused?.byName).toBe(room.players.find(p => p.socketId === other)!.name);
+    const turn = findLegalTurn(room.match!, seat);
+    const held = { roomId, version: room.match!.version, requestId: requestId(), turn };
+    expect(await service.submitTurn(socket, held)).toEqual({ ok: false, code: 'PAUSED' });
+    expect(await service.resume(socket, { roomId })).toEqual({ ok: false, code: 'NOT_PAUSER' });
+    service.disconnected(other);
+    await flush();
+    expect(await service.resume(socket, { roomId })).toEqual({ ok: true });
+    expect((await service.submitTurn(socket, held)).ok).toBe(true);
+  });
 });

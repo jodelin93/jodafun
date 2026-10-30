@@ -126,6 +126,18 @@ export class DominoesGateway implements OnGatewayInit, OnGatewayDisconnect {
     return this.dominoes.pass(client.id, data ?? {});
   }
 
+  @SubscribeMessage('dominoes:pause')
+  pause(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
+    if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;
+    return this.dominoes.pause(client.id, data ?? {});
+  }
+
+  @SubscribeMessage('dominoes:resume')
+  resume(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
+    if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;
+    return this.dominoes.resume(client.id, data ?? {});
+  }
+
   @SubscribeMessage('dominoes:rematch')
   rematch(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
     if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;

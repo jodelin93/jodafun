@@ -98,6 +98,7 @@ export interface DominoRoomView {
   seats: PublicDominoSeat[];
   match: PublicDominoView | null;
   outcome: DominoOutcome | null;
+  paused: { byId: string; byName: string; since: number } | null;
 }
 
 export interface DominoPrivateView {
@@ -138,6 +139,8 @@ export type DominoErrorCode =
   | 'BAD_REQUEST_ID'
   | 'RATE_LIMITED'
   | 'NOT_FINISHED'
+  | 'PAUSED'
+  | 'NOT_PAUSER'
   // Client-side only: no answer before the timeout, or a move is still being sent
   | 'NO_ANSWER'
   | 'BUSY';

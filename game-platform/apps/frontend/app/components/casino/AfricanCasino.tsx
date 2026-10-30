@@ -20,6 +20,7 @@ import CasinoLobby, { TARGETS } from './CasinoLobby';
 import CasinoTable, { type SeatInfo } from './CasinoTable';
 import CasinoResults from './CasinoResults';
 import CasinoRules from './CasinoRules';
+import TableMenu from '../ui/TableMenu';
 import CasinoTutorial from './CasinoTutorial';
 
 type Screen = 'menu' | 'rules' | 'tutorial';
@@ -290,19 +291,32 @@ export default function AfricanCasino() {
       />
     );
   } else if (room?.match && mine?.match) {
+    const pauser = room.paused ? room.seats.find(s => s.player?.id === room.paused?.byId)?.player : null;
     content = (
-      <CasinoTable
-        match={room.match}
-        mine={mine.match}
-        seats={seats}
-        capacity={room.capacity}
-        onPreview={preview}
-        onPlay={playTurn}
-        onTake={take}
-        onHint={hint}
-        onHold={room.capacity === 4 ? hold : undefined}
-        connectionNote={connectionNote}
-      />
+      <>
+        <TableMenu
+          paused={room.paused}
+          myPlayerId={mine.playerId}
+          pauserAway={!pauser || !pauser.connected}
+          onPause={() => casino.roomAction('casino:pause')}
+          onResume={() => casino.roomAction('casino:resume')}
+          onLeave={() => void leave()}
+          rules={close => <CasinoRules onBack={close} />}
+          errorText={errorText}
+        />
+        <CasinoTable
+          match={room.match}
+          mine={mine.match}
+          seats={seats}
+          capacity={room.capacity}
+          onPreview={preview}
+          onPlay={playTurn}
+          onTake={take}
+          onHint={hint}
+          onHold={room.capacity === 4 ? hold : undefined}
+          connectionNote={connectionNote}
+        />
+      </>
     );
   } else if (restoring || (urlRoom && connection === 'connecting')) {
     content = <Loading label={t('loadingRoom')} />;

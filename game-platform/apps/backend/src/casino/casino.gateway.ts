@@ -138,6 +138,18 @@ export class CasinoGateway implements OnGatewayInit, OnGatewayDisconnect {
     return { ok: true, ...checkTutorial(data?.step, data?.turn) };
   }
 
+  @SubscribeMessage('casino:pause')
+  pause(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
+    if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;
+    return this.casino.pause(client.id, data ?? {});
+  }
+
+  @SubscribeMessage('casino:resume')
+  resume(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
+    if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;
+    return this.casino.resume(client.id, data ?? {});
+  }
+
   @SubscribeMessage('casino:rematch')
   rematch(@MessageBody() data: Payload, @ConnectedSocket() client: Socket) {
     if (!this.lobbyLimiter.allow(client.id)) return RATE_LIMITED;

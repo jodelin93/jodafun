@@ -21,6 +21,7 @@ import DominoesLobby from './DominoesLobby';
 import DominoesTable, { type Answer, type SeatInfo } from './DominoesTable';
 import DominoesResults from './DominoesResults';
 import DominoesRules from './DominoesRules';
+import TableMenu from '../ui/TableMenu';
 import DominoesTutorial from './DominoesTutorial';
 
 type Screen = 'menu' | 'rules' | 'tutorial';
@@ -283,9 +284,20 @@ export default function Dominoes() {
       />
     );
   } else if (room?.match && mine?.match) {
+    const pauser = room.paused ? room.seats.find(s => s.player?.id === room.paused?.byId)?.player : null;
     content = (
       <>
         <h1 className="sr-only">{t('title')}</h1>
+        <TableMenu
+          paused={room.paused}
+          myPlayerId={mine.playerId}
+          pauserAway={!pauser || !pauser.connected}
+          onPause={() => dominoes.roomAction('dominoes:pause')}
+          onResume={() => dominoes.roomAction('dominoes:resume')}
+          onLeave={() => void leave()}
+          rules={close => <DominoesRules onBack={close} />}
+          errorText={errorText}
+        />
         <DominoesTable match={room.match} me={mine.match} seats={seats} onPlay={playTile} onPass={passTurn} sending={sending} connectionNote={connectionNote} />
       </>
     );

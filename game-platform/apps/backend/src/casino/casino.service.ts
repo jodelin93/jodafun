@@ -4,7 +4,7 @@ import type { SessionUser } from '../auth/session';
 import { RoomStore } from '../game/room-store';
 import { generateRoomCode, normalizeRoomCode } from '../game/game.utils';
 import { presenceName } from '../game/presence';
-import type { SeatListener, TeamRoomGame } from '../game/team-room';
+import { canResume, pauseView, type SeatListener, type TeamRoomGame } from '../game/team-room';
 import { secureRandomInt, shuffle, type RandomInt } from './engine/cards';
 import {
   createMatch,
@@ -254,6 +254,28 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
     });
   }
 
+  // Freezes the match: no turn is accepted until it is resumed
+  pause(socketId: string, input: { roomId?: unknown }) {
+    return this.asPlayer(socketId, input.roomId, (room, player) => {
+      if (room.status !== 'playing' || !room.match) return fail('GAME_NOT_ACTIVE');
+      if (!room.paused) {
+        room.paused = { by: player.id, at: Date.now() };
+        this.changed(room);
+      }
+      return { ok: true as const };
+    });
+  }
+
+  resume(socketId: string, input: { roomId?: unknown }) {
+    return this.asPlayer(socketId, input.roomId, (room, player) => {
+      if (!room.paused) return { ok: true as const };
+      if (!canResume(room.paused, player.id, room.players)) return fail('NOT_PAUSER');
+      room.paused = null;
+      this.changed(room);
+      return { ok: true as const };
+    });
+  }
+
   // --- Play ---
 
   submitTurn(socketId: string, input: { roomId?: unknown; version?: unknown; requestId?: unknown; turn?: unknown }) {
@@ -265,6 +287,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
 
       const match = room.match;
       if (room.status !== 'playing' || !match) return fail('GAME_NOT_ACTIVE');
+      if (room.paused) return fail('PAUSED');
       if (input.version !== match.version) return fail('STALE_STATE', { version: match.version });
       const seat = player.seat;
       let ack: CasinoAck<{ version: number }>;
@@ -312,6 +335,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
       if (previous) return previous.ack;
       const match = room.match;
       if (room.status !== 'playing' || !match) return fail('GAME_NOT_ACTIVE');
+      if (room.paused) return fail('PAUSED');
       if (input.version !== match.version) return fail('STALE_STATE', { version: match.version });
       const parsed = parseTurn({ actions: [input.action] });
       const action = parsed.ok ? parsed.proposal.actions[0] : null;
@@ -348,6 +372,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
   hold(socketId: string, input: { roomId?: unknown; value?: unknown }) {
     return this.asPlayer(socketId, input.roomId, (room, player) => {
       if (room.status !== 'playing' || !room.match) return fail('GAME_NOT_ACTIVE');
+      if (room.paused) return fail('PAUSED');
       const result = requestHold(room.match, player.seat, Number(input.value));
       if (!result.ok) return fail(result.error.code, { params: result.error.params });
       if (result.state !== room.match) {
@@ -435,6 +460,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
     room.match = createMatch({ players: room.capacity, targetPoints: room.targetPoints }, this.random);
     room.matchPlayers = room.players.map(p => ({ id: p.id, name: p.name, userId: p.userId, seat: p.seat }));
     room.outcome = null;
+    room.paused = null;
     room.processed = {};
     room.players.forEach(p => (p.isReady = false));
     console.log(`Casino match ${room.matchId} started in room ${room.id}`);
@@ -443,6 +469,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
   private finishMatch(room: CasinoRoom) {
     const match = room.match!;
     room.status = 'finished';
+    room.paused = null;
     room.outcome = {
       matchId: room.matchId!,
       winnerTeam: match.winnerTeam,
@@ -481,6 +508,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
     if (room.status !== 'lobby') {
       room.status = 'lobby';
       room.match = null;
+      room.paused = null;
     }
     room.players.forEach(p => (p.isReady = false));
     if (room.players.length === 0) {
@@ -658,6 +686,7 @@ export class CasinoService implements OnModuleInit, OnModuleDestroy, TeamRoomGam
       }),
       match: room.match ? publicView(room.match) : null,
       outcome: room.outcome,
+      paused: room.status === 'playing' ? pauseView(room.paused, room.players) : null,
     };
   }
 

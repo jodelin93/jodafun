@@ -641,3 +641,37 @@ describe('Dominoes and other games', () => {
     expect(legacy.gameStartedAt).toEqual(new Date('2026-01-01T00:00:00.000Z'));
   });
 });
+
+describe('Dominoes pause', () => {
+  it('freezes moves until whoever paused resumes; a held request goes through afterwards', async () => {
+    const { service, store, emitter } = setup();
+    const roomId = await startedRoom(service, 'head-to-head');
+    const room = roomOf(store, roomId);
+    const { seat, socket, move, version } = nextMove(room);
+    const other = socketAt(room, 1 - seat);
+
+    expect(await service.pause(other, { roomId })).toEqual({ ok: true });
+    expect(emitter.room.get(roomId)!.paused).toEqual(expect.objectContaining({ byId: room.players.find(p => p.socketId === other)!.id }));
+    const held = { roomId, version, requestId: requestId(), tile: move.tile, end: move.end };
+    expect(await service.play(socket, held)).toEqual({ ok: false, code: 'PAUSED' });
+    expect(roomOf(store, roomId).match!.version).toBe(version);
+
+    // Only the player who paused may resume while they are here
+    expect(await service.resume(socket, { roomId })).toEqual({ ok: false, code: 'NOT_PAUSER' });
+    expect(await service.resume(other, { roomId })).toEqual({ ok: true });
+    expect(emitter.room.get(roomId)!.paused).toBeNull();
+    expect((await service.play(socket, held)).ok).toBe(true);
+  });
+
+  it('lets anyone resume once the player who paused has lost connection, and refuses a pause outside a match', async () => {
+    const { service, store } = setup();
+    const lobby = await readyRoom(service, 'head-to-head');
+    expect(await service.pause('s0', { roomId: lobby })).toEqual({ ok: false, code: 'NOT_PLAYING' });
+    await service.start('s0', { roomId: lobby });
+    expect((await service.pause('s0', { roomId: lobby })).ok).toBe(true);
+    service.disconnected('s0');
+    await flush();
+    expect(await service.resume('s1', { roomId: lobby })).toEqual({ ok: true });
+    expect(roomOf(store, lobby).paused).toBeNull();
+  });
+});

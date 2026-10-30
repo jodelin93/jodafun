@@ -1,5 +1,6 @@
 import type { DominoMatch, HandResult, Mode, RuleError, RuleErrorCode, TileId } from './engine/types';
 import type { PrivateDominoView, PublicDominoView } from './engine/match';
+import type { PauseView, RoomPause } from '../game/team-room';
 
 export const DOMINOES_GAME_TYPE = 'dominoes';
 
@@ -64,6 +65,7 @@ export interface DominoRoom {
   matchStartedAt: number | null;
   matchPlayers: DominoMatchPlayer[] | null;
   outcome: DominoOutcome | null;
+  paused?: RoomPause | null; // missing on rooms saved before pausing existed
   pendingResults: DominoResult[];
   processed: Record<string, ProcessedRequest[]>; // by player id
   createdAt: number;
@@ -82,6 +84,8 @@ export interface DominoRoom {
 //   dominoes:start      { roomId }                                      (host; every seat filled, connected and ready)
 //   dominoes:play       { roomId, version, requestId, tile, end }       → { version }
 //   dominoes:pass       { roomId, version, requestId }                  → { version }
+//   dominoes:pause      { roomId }                                      (seated, while playing: freezes moves)
+//   dominoes:resume     { roomId }                                      (whoever paused; anyone once they are gone)
 //   dominoes:rematch    { roomId }                                      (after a finished match: back to the lobby, same seats)
 //   dominoes:leave      { roomId }
 //   dominoes:tutorial   { step }                                        → { step, id, view, me, total }
@@ -111,7 +115,9 @@ export type DominoErrorCode =
   | 'STALE_STATE'
   | 'BAD_REQUEST_ID'
   | 'RATE_LIMITED'
-  | 'NOT_FINISHED';
+  | 'NOT_FINISHED'
+  | 'PAUSED' // a move while the match is paused
+  | 'NOT_PAUSER'; // resume asked by someone other than whoever paused, while they are still here
 
 export type DominoAck<T = object> =
   | ({ ok: true } & T)
@@ -141,6 +147,7 @@ export interface DominoRoomView {
   seats: PublicDominoSeat[];
   match: PublicDominoView | null;
   outcome: DominoOutcome | null;
+  paused: PauseView | null; // while playing: who froze the match
 }
 
 // dominoes:private, sent to one player only

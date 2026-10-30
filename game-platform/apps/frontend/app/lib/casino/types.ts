@@ -92,6 +92,7 @@ export interface CasinoRoomView {
   seats: PublicSeat[];
   match: PublicMatch | null;
   outcome: CasinoOutcome | null;
+  paused: { byId: string; byName: string; since: number } | null;
 }
 
 export interface CasinoPrivateView {
