@@ -1121,17 +1121,30 @@ export class GameGateway implements OnModuleInit, OnGatewayConnection, OnGateway
     // Playing: seated and connected in some game's room. Shown so people know who is around; they
     // can't receive a request until they leave. Only the game is told, never the room code.
     const shown = new Set(available.map(p => p.id));
-    const accounts = new Set(this.listedPlayers().map(e => e.userId).filter(Boolean));
+    const listed = this.listedPlayers();
+    const accounts = new Set(listed.map(e => e.userId).filter(Boolean));
+    const keys = new Set(listed.map(e => e.playerKey).filter(Boolean));
+    const online = [...this.presence.available.values()].filter(e => this.server.sockets.sockets.get(e.socketId)?.connected);
     const playing: { id: string; name: string; isGuest: boolean; since: number; status: 'playing'; game: string }[] = [];
     for (const room of this.rooms.allRooms()) {
       for (const p of room.players) {
-        if (!p.connected || !this.server.sockets.sockets.get(p.socketId)?.connected) continue;
-        if (!notMe(p.socketId, p.userId ?? null) || shown.has(p.socketId)) continue;
+        let socketId = p.socketId;
+        if (!p.connected || !this.server.sockets.sockets.get(p.socketId)?.connected) {
+          // Away from a seat still held for them (left the page without leaving the room) but
+          // online elsewhere, on a menu or another tab: that seat hides them from the available
+          // list, so they are shown here rather than nowhere
+          const elsewhere = online.find(e => (p.userId && e.userId === p.userId) || (p.playerKey && e.playerKey === p.playerKey));
+          if (!elsewhere) continue;
+          socketId = elsewhere.socketId;
+        }
+        if (!notMe(socketId, p.userId ?? null) || shown.has(socketId)) continue;
         if (p.userId && accounts.has(p.userId)) continue;
-        shown.add(p.socketId);
+        if (p.playerKey && keys.has(p.playerKey)) continue;
+        shown.add(socketId);
         if (p.userId) accounts.add(p.userId);
+        if (p.playerKey) keys.add(p.playerKey);
         // Whether a seated player is a guest isn't known here: no guest chip rather than a wrong one
-        playing.push({ id: p.socketId, name: p.name, isGuest: false, since: room.updatedAt, status: 'playing', game: room.gameType ?? 'joda-memory' });
+        playing.push({ id: socketId, name: p.name, isGuest: false, since: room.updatedAt, status: 'playing', game: room.gameType ?? 'joda-memory' });
       }
     }
     const players = [...available.sort((a, b) => a.name.localeCompare(b.name)), ...playing.sort((a, b) => a.name.localeCompare(b.name))].slice(0, PRESENCE_LIST_MAX);

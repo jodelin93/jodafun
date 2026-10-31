@@ -113,6 +113,28 @@ describe('Invitations into Dominoes rooms', () => {
     close();
   });
 
+  it('shows someone away from a seat still held for them as playing, on their other page', async () => {
+    const { casino, gateway, socket, close } = setup();
+    // Dad opens a Casino room, then goes back to a menu without leaving it: the seat is kept for him
+    const table = socket('d0', 0);
+    const created = await casino.create('d0', user(0), { name: 'Dad', playerKey: 'browser-key-dad', players: 2 });
+    if (!created.ok) throw new Error();
+    gateway.handleDisconnect(table);
+    casino.disconnected(table.id);
+    await flush();
+    const menu = socket('d1', 0);
+    await gateway.handlePresenceUpdate({ available: true, name: 'Dad', playerKey: 'browser-key-dad' }, menu);
+    const guest = socket('g1', 1);
+    await gateway.handlePresenceUpdate({ available: true, name: 'Guest', playerKey: 'browser-key-guest' }, guest);
+
+    // Each sees the other: the guest as available, Dad as playing (not invitable while his seat is held)
+    expect((await gateway.handlePresenceList(menu)).players.map(p => [p.id, p.status])).toEqual([['g1', 'available']]);
+    const seenByGuest = (await gateway.handlePresenceList(guest)).players;
+    expect(seenByGuest.map(p => [p.id, p.name, p.status, 'game' in p ? p.game : null])).toEqual([['d1', 'Dad', 'playing', 'african-casino']]);
+    expect((await gateway.handleInviteSend({ toId: 'd1', playerKey: 'browser-key-guest' }, guest)).success).toBe(false);
+    close();
+  });
+
   it('still seats a Casino invitee through the Casino join, with the same answers as before', async () => {
     const { casino, gateway, server, socket, store, close } = setup();
     const host = socket('c0', 0);
