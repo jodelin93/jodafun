@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Crown, WifiOff } from 'lucide-react';
-import { captureValuesOf, isAce, rankOf } from '../../lib/casino/cards';
+import { captureValuesOf, cardText, isAce, rankOf, setMatches, sumOf, valueLabel } from '../../lib/casino/cards';
 import { draftBuilds, emptySelection, makeStep, usedByDraft, type Selection } from '../../lib/casino/draft';
 import { describeError, describeSummary } from '../../lib/casino/describe';
 import { partnerOfSeat, teamOfSeat, type PrivateMatch, type PublicMatch, type RuleError, type TurnAction, type TurnProposal } from '../../lib/casino/types';
@@ -109,6 +109,24 @@ export default function CasinoTable({ match, mine, seats, capacity, onPreview, o
         setNotice(describeError(tx, { code: 'SET_SUM_MISMATCH', params: { value, cards: sel.loose } }));
       }
       return;
+    }
+    // "Add" makes a group worth the build's value: refuse it now rather than leave a turn that can
+    // never be played, and point to "Build" when the cards were meant to be summed
+    const a = result.action;
+    if (a.type === 'augment' && !a.pile) {
+      const value = a.base ? (isAce(a.base) ? (a.baseValue ?? 14) : rankOf(a.base)) : target?.value;
+      const set = [...a.loose, ...(a.hand ? [a.hand] : [])];
+      if (value !== undefined && set.length > 0 && !setMatches(set, value)) {
+        const all = a.base ? [a.base, ...set] : [];
+        const total = sumOf(all);
+        const canBuild = all.length >= 2 && total <= 14 && (!a.hand || all.length === 2);
+        setNotice(
+          canBuild
+            ? t('addUseBuild', { value: valueLabel(value), total: valueLabel(total), all: all.map(cardText).join(' + ') })
+            : describeError(tx, { code: 'SET_SUM_MISMATCH', params: { value, cards: set } }),
+        );
+        return;
+      }
     }
     setActions(a => [...a, result.action]);
     setSel(s => ({ ...emptySelection(), aceValue: s.aceValue }));

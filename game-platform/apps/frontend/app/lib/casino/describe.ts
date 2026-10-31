@@ -12,7 +12,8 @@ export function describeError(t: T, error: Pick<RuleError, 'code' | 'params'>, b
   const value = p.value ?? buildValue;
   const vars = { value: value !== undefined ? valueLabel(value) : '', cards: list(p.cards ?? []) };
   const withBuild = (error.code === 'CAPTURE_INCOMPLETE' || error.code === 'DISCARD_COULD_CAPTURE') && !p.cards?.length;
-  const key = `err_${error.code}${withBuild ? '_BUILD' : ''}`;
+  const one = error.code === 'SET_SUM_MISMATCH' && p.cards?.length === 1;
+  const key = `err_${error.code}${withBuild ? '_BUILD' : ''}${one ? '_one' : ''}`;
   const text = t(key, vars);
   return text === key ? t('errUnknown', { code: error.code }) : text;
 }
