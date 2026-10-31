@@ -95,7 +95,8 @@ export default function CasinoTable({ match, mine, seats, capacity, onPreview, o
     setSel(s => ({ ...s, hand: s.hand === id ? null : id, aceValue: isAce(id) ? 14 : s.aceValue }));
   };
 
-  const addStep = (kind: StepKind, base?: string) => {
+  const addingRef = useRef(false);
+  const addStep = async (kind: StepKind, base?: string) => {
     setNotice(null);
     // "Add" with just a hand card on the opponents' single build raises its value, as "Change value" does
     const target = allBuilds.find(b => b.id === sel.build);
@@ -128,7 +129,19 @@ export default function CasinoTable({ match, mine, seats, capacity, onPreview, o
         return;
       }
     }
-    setActions(a => [...a, result.action]);
+    // The server checks a turn step by step: an error on this new step (a total over 14, a value
+    // already taken, a capture that leaves cards behind...) can't be fixed by any later step, so the
+    // step is refused now. Errors on the turn as a whole ("no card played yet") wait for the next steps.
+    if (addingRef.current) return;
+    addingRef.current = true;
+    const next = [...actions, result.action];
+    const checked = await onPreview(next);
+    addingRef.current = false;
+    if (checked && !checked.valid && checked.error?.action === actions.length) {
+      setNotice(describeError(tx, checked.error, [...match.builds, ...draftBuilds(match, next, seat, partner)]));
+      return;
+    }
+    setActions(next);
     setSel(s => ({ ...emptySelection(), aceValue: s.aceValue }));
     setAskingBase(false);
   };
