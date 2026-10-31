@@ -125,6 +125,8 @@ interface Work {
   augmentedOpponentBuilds: Set<string>;
   summary: ActionSummary[];
   pileUsed: boolean;
+  // Builds made this turn, and whether a card from the hand went into them
+  newBuilds: Map<string, boolean>;
 }
 
 function use(w: Work, id: string) {
@@ -256,12 +258,9 @@ function build(w: Work, a: BuildAction) {
   checkValueFree(w, value);
   const owner = newOwner(w, value, a.forPartner);
   removeLoose(w, a.loose);
-  w.s.builds.push({
-    id: `b${w.s.nextBuildId++}`,
-    value,
-    owner,
-    groups: [cards.map(id => ({ id, value: rankOf(id) }))],
-  });
+  const id = `b${w.s.nextBuildId++}`;
+  w.s.builds.push({ id, value, owner, groups: [cards.map(id => ({ id, value: rankOf(id) }))] });
+  w.newBuilds.set(id, Boolean(a.hand));
   w.summary.push({ type: 'build', cards: byDeckOrder(cards), value, owner });
 }
 
@@ -295,6 +294,7 @@ function augment(w: Work, a: AugmentAction) {
     if (a.forPartner) fail('BAD_REQUEST');
     if (!setMatches(set, target.value)) fail('SET_SUM_MISMATCH', { value: target.value, cards: set });
     target.groups.push(set.map(id => ({ id, value: valueInSet(id, set.length, target.value) })));
+    if (a.hand && w.newBuilds.has(target.id)) w.newBuilds.set(target.id, true);
     if (a.giveToPartner) {
       const partner = partnerOf(w.s, w.seat);
       const allowed = a.hand && ours && partner !== null && w.s.holds[partner].includes(rankForValue(target.value));
@@ -321,6 +321,7 @@ function augment(w: Work, a: AugmentAction) {
       groups: [[{ id: base, value }], set.map(id => ({ id, value: valueInSet(id, set.length, value) }))],
     };
     w.s.builds.push(target);
+    w.newBuilds.set(target.id, Boolean(a.hand));
     newBuild = true;
   }
   removeLoose(w, a.loose);
@@ -390,6 +391,12 @@ function checkFinalPosition(w: Work) {
     if (owned.length > 1) fail('TOO_MANY_BUILDS');
   }
   // Joda Fun rule: cards that could join your side's builds may be left for later
+  // Joda Fun rule: a build left on the table for later needs a card from the hand; one made from
+  // table cards only must be taken in the same turn
+  for (const [id, withHand] of w.newBuilds) {
+    const left = w.s.builds.find(b => b.id === id);
+    if (left && !withHand) fail('BUILD_NEEDS_HAND_CARD', { value: left.value, build: id });
+  }
 }
 
 function newWork(state: MatchState, seat: Seat): Work {
@@ -402,7 +409,19 @@ function newWork(state: MatchState, seat: Seat): Work {
     augmentedOpponentBuilds: new Set(),
     summary: [],
     pileUsed: false,
+    newBuilds: stagedNewBuilds(state),
   };
+}
+
+// A build started earlier this turn by taking the opponents' pile card onto a table card has no
+// card from the hand yet (one build per value, so the value finds it)
+function stagedNewBuilds(state: MatchState) {
+  const made = new Map<string, boolean>();
+  for (const s of state.staged) {
+    const build = s.type === 'augment' && s.newBuild ? state.builds.find(b => b.value === s.value) : undefined;
+    if (build) made.set(build.id, false);
+  }
+  return made;
 }
 
 function runAction(w: Work, action: TurnAction) {

@@ -6,7 +6,7 @@ const ANSWERS: TurnAction[][] = [
   [{ type: 'capture', card: '7H', sets: [['7S']], builds: [] }],
   [{ type: 'capture', card: '9D', sets: [['5C', '4H']], builds: [] }],
   [{ type: 'build', hand: '6H', loose: ['4S'] }],
-  [{ type: 'augment', base: '8D', loose: ['3S'], pile: true }, { type: 'discard', card: '2H' }],
+  [{ type: 'augment', base: '8D', loose: ['3S'], pile: true }, { type: 'capture', card: '8C', sets: [], builds: ['b100'] }],
   [{ type: 'capture', card: '10H', sets: [['10S'], ['6D', '4C']], builds: [] }],
 ];
 

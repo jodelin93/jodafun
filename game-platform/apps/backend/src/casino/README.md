@@ -61,6 +61,10 @@ Builds
   loose card; a hand card with two or more loose cards is refused (`BUILD_ONE_TABLE_CARD`). No build
   is ever worth more than 14 (`VALUE_TOO_HIGH`). The builder must keep a card that captures it. Capture-pile cards can't be used. If your side already owns a build of
   that value, add the set to it instead (the engine asks you to).
+- Joda Fun rule: a build left on the table at the end of a turn needs a card from the builder's
+  hand. A new build made only from loose or pile cards (a single build from loose cards, a new
+  augmented build on a loose base, a "take from pile" onto a loose card) must be captured in the
+  same turn, unless a hand card is added to it in that turn (`BUILD_NEEDS_HAND_CARD`).
 - Changing a value: only an opponent's single build, only by adding one hand card, and only if you
   keep a card matching the new value. You become the owner. Augmented builds never change value.
   If the new value is one your side already owns, the two become one augmented build.

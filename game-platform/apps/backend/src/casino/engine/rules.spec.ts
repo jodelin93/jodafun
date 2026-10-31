@@ -129,9 +129,15 @@ describe('discarding', () => {
 });
 
 describe('single builds', () => {
-  it('builds from the layout when a capture card is kept', () => {
-    const state = scenario({ ...four([['10H', '2C'], ['KD'], ['QD'], ['JD']]), loose: ['5S', '3D', '2D'] });
-    const next = ok(turn(state, 0, { type: 'build', loose: ['5S', '3D', '2D'] }, { type: 'discard', card: '2C' }));
+  it('builds from table cards only to take it in the same turn (Joda Fun rule)', () => {
+    const state = scenario({ ...four([['10H', '2C'], ['KD'], ['QD'], ['JD']]), loose: ['5S', '3D', '2D', '7C'] });
+    const layout = { type: 'build' as const, loose: ['5S', '3D', '2D'] };
+    expect(turn(state, 0, layout, { type: 'capture', card: '10H', sets: [], builds: ['b100'] }).ok).toBe(true);
+    // Left for later, it would hold no card from the hand
+    expect(errorOf(turn(state, 0, layout, { type: 'discard', card: '2C' }))).toBe('BUILD_NEEDS_HAND_CARD');
+    // A card from the hand added to it in the same turn makes it a build for later
+    const later = scenario({ ...four([['10H', '8C'], ['KD'], ['QD'], ['JD']]), loose: ['3D', '7C', '2D'] });
+    const next = ok(turn(later, 0, { type: 'build', loose: ['3D', '7C'] }, { type: 'augment', build: 'b100', hand: '8C', loose: ['2D'] }));
     expect(next.builds).toEqual([expect.objectContaining({ value: 10, owner: 0 })]);
   });
 
@@ -182,9 +188,9 @@ describe('single builds', () => {
   });
 
   it('fixes ace values inside a build until it is captured', () => {
-    const state = scenario({ ...four([['AD', '2S'], ['AC', '3H'], ['QD'], ['JD']]), loose: ['AS', 'KC', 'AH'] });
-    // A 14-build: a base ace as 14 plus K + A, where that second ace counts 1
-    const next = ok(turn(state, 0, { type: 'augment', base: 'AS', baseValue: 14, loose: ['KC', 'AH'] }, { type: 'discard', card: '2S' }));
+    const state = scenario({ ...four([['AD', 'AH'], ['AC', '3H'], ['QD'], ['JD']]), loose: ['AS', 'KC'] });
+    // A 14-build: a base ace as 14 plus K + A, where that second ace (from the hand) counts 1
+    const next = ok(turn(state, 0, { type: 'augment', base: 'AS', baseValue: 14, loose: ['KC'], hand: 'AH' }));
     expect(next.builds[0].groups).toEqual([[{ id: 'AS', value: 14 }], [{ id: 'KC', value: 13 }, { id: 'AH', value: 1 }]]);
     // An ace played as 1 can't take it
     expect(errorOf(turn(next, 1, { type: 'capture', card: 'AC', aceValue: 1, sets: [], builds: ['b100'] }))).toBe('BUILD_VALUE_MISMATCH');
@@ -236,8 +242,12 @@ describe('augmenting and capture piles', () => {
     if (!taken.ok) throw new Error(taken.error.code);
     expect(taken.state.turn).toBe(0);
     expect(publicView(taken.state).piles[1]).toEqual({ count: 2, top: '2D' });
-    const next = ok(turn(taken.state, 0, { type: 'augment', build: 'b100', loose: ['7D'], pile: true }, { type: 'discard', card: '3C' }));
-    expect(next.builds[0].groups.map(g => g.map(c => c.id))).toEqual([['9S'], ['4C', '5S'], ['7D', '2D']]);
+    const addSeven = { type: 'augment' as const, build: 'b100', loose: ['7D'], pile: true };
+    // Made of table and pile cards only, the build must be taken in the same turn (Joda Fun rule)
+    expect(errorOf(turn(taken.state, 0, addSeven, { type: 'discard', card: '3C' }))).toBe('BUILD_NEEDS_HAND_CARD');
+    const next = ok(turn(taken.state, 0, addSeven, { type: 'capture', card: '9H', sets: [], builds: ['b100'] }));
+    expect(next.builds).toEqual([]);
+    expect(next.piles[0]).toEqual(expect.arrayContaining(['9S', '4C', '5S', '7D', '2D', '9H']));
     expect(next.piles[1]).toEqual(['KS']);
     expect(next.lastTurn?.actions).toHaveLength(3);
   });
@@ -248,7 +258,7 @@ describe('augmenting and capture piles', () => {
       errorOf(turn(state, 0, { type: 'augment', base: '9S', loose: ['4C'], pile: true }, { type: 'augment', build: 'b100', loose: ['7D'], pile: true }, { type: 'discard', card: '3C' })),
     ).toBe('PILE_ALREADY_USED');
     // The 2 it uncovers would fit with the 7, but nobody could see it: it is not demanded
-    expect(turn(state, 0, { type: 'augment', base: '9S', loose: ['4C'], pile: true }, { type: 'discard', card: '3C' }).ok).toBe(true);
+    expect(turn(state, 0, { type: 'augment', base: '9S', loose: ['4C'], pile: true }, { type: 'capture', card: '9H', sets: [], builds: ['b100'] }).ok).toBe(true);
   });
 
   it('takes pile cards early only into the side’s builds or onto a base the player can capture', () => {
@@ -357,7 +367,8 @@ describe('partnerships', () => {
     const unknown = scenario({ ...base, turn: 2 });
     expect(errorOf(turn(unknown, 2, { type: 'build', loose: ['6C', '3H'], forPartner: true }, { type: 'discard', card: 'KC' }))).toBe('PARTNER_NOT_PROVEN');
     const known = scenario({ ...base, turn: 2, proven: [[9], [], [], []] });
-    const next = ok(turn(known, 2, { type: 'build', loose: ['6C', '3H'], forPartner: true }, { type: 'discard', card: 'KC' }));
+    expect(errorOf(turn(known, 2, { type: 'build', loose: ['6C', '3H'], forPartner: true }, { type: 'discard', card: 'KC' }))).toBe('BUILD_NEEDS_HAND_CARD');
+    const next = ok(turn(known, 2, { type: 'build', hand: '3S', loose: ['6C'], forPartner: true }));
     expect(next.builds[0]).toEqual(expect.objectContaining({ value: 9, owner: 0 }));
     expect(errorOf(turn(scenario({ ...base, players: 2, hands: [['5H'], ['9D']] }), 0, { type: 'build', loose: ['6C', '3H'], forPartner: true }))).toBe('NO_PARTNER');
   });
